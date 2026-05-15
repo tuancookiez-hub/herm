@@ -26,6 +26,7 @@ export type ExitStats = {
   outputTok?: number
   skin?: GatewaySkin | null
   model?: string
+  avatar?: string[]
 }
 
 const esc = (s: string) => `\x1b[${s}m`
@@ -62,6 +63,7 @@ export function banner(
   tools?: string,
   itok?: string,
   otok?: string,
+  avatar?: string[],
 ): string {
   const cols = process.stdout.columns ?? 0
   const rows = process.stdout.rows ?? 0
@@ -70,13 +72,18 @@ export function banner(
     : { lines: [] as string[], inner: { x: 0, y: 0, w: 0, h: 0 } }
 
   if (frameLines.length === 0)
-    return fallback(g, d, n, t, sid, m, tools, itok, otok)
+    return fallback(g, d, n, t, sid, m, tools, itok, otok, avatar)
 
   const content: string[] = []
   const center = (s: string) => {
     const stripped = s.replace(/\x1b\[[0-9;]*m/g, "")
     const pad = Math.max(0, Math.floor((inner.w - stripped.length) / 2))
     return " ".repeat(pad) + s
+  }
+
+  if (avatar) {
+    for (const row of avatar) content.push(center(`${cyan}${row}${reset}`))
+    content.push("")
   }
 
   content.push("")
@@ -129,6 +136,7 @@ function fallback(
   tools?: string,
   itok?: string,
   otok?: string,
+  avatar?: string[],
 ): string {
   const w = 60
   const pad = (s: string) => {
@@ -140,6 +148,11 @@ function fallback(
   const bot = `${dim}└${"─".repeat(w)}┘${reset}`
   const empty = pad("")
   const lines: string[] = [top, empty]
+
+  if (avatar) {
+    for (const row of avatar) lines.push(pad(`${cyan}${row}${reset}`))
+    lines.push(empty)
+  }
 
   const msg = `  ${g}  `
   const half = Math.max(0, (w - msg.length) / 2)
@@ -190,7 +203,7 @@ export function quit(
     const m = stats?.model ?? ""
     const t = title ? title.slice(0, 60) : ""
     writeSync(1, "\x1b[2J\x1b[H")
-    writeSync(1, "\n" + banner(g, d, n, t, sid, m, tools, itok, otok) + "\n")
+    writeSync(1, "\n" + banner(g, d, n, t, sid, m, tools, itok, otok, stats?.avatar) + "\n")
   }
   process.exit(0)
 }

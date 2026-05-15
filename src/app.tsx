@@ -582,6 +582,9 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
     onQuit: () => {
       const toolCount = turn.messages.reduce(
         (n, m) => n + m.parts.filter(p => p.type === "tool").length, 0)
+      const avatarState = eikon?.states.get("working")
+        ?? eikon?.states.get("idle")
+      const avatar = avatarState?.frames[0]
       quit(renderer, sid, title, gw, {
         start: sessionStart.current,
         msgs: turn.messages.length,
@@ -590,6 +593,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
         outputTok: usage?.output,
         skin: skin.skin,
         model: info?.model,
+        avatar,
       })
     },
     onQuitArm: (label) =>
