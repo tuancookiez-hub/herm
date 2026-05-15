@@ -81,8 +81,12 @@ export function banner(
     return " ".repeat(pad) + s
   }
 
-  if (avatar) {
-    for (const row of avatar) content.push(center(`${cyan}${row}${reset}`))
+  // Only show avatar if terminal is tall enough (frame inner height
+  // must fit avatar + goodbye + stats + resume with some margin).
+  const showAvatar = avatar && inner.h >= avatar.length + 12
+
+  if (showAvatar) {
+    for (const row of avatar!) content.push(center(`${cyan}${row}${reset}`))
     content.push("")
   }
 
@@ -149,8 +153,10 @@ function fallback(
   const empty = pad("")
   const lines: string[] = [top, empty]
 
-  if (avatar) {
-    for (const row of avatar) lines.push(pad(`${cyan}${row}${reset}`))
+  const showAvatar = avatar && (lines.length + avatar.length + 12) <= 40
+
+  if (showAvatar) {
+    for (const row of avatar!) lines.push(pad(`${cyan}${row}${reset}`))
     lines.push(empty)
   }
 
