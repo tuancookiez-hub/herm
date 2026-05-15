@@ -420,7 +420,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
   const sendRef = useRef<(raw: string) => void>(() => {})
   const slash = useSlash({
     dispatch, session, turnRef, queueRef, sendRef, composer, summoned, undone,
-    ready, info, sid, title, skin,
+    ready, info, sid, title, skin, eikon,
     setQueue, setFocusRegion, setSplash, setAttachments, setInfo, setUsage, setTitle,
     newSession, switchSession, rewind, goTo, attachClipboard,
   })

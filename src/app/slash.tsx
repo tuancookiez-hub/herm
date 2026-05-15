@@ -22,6 +22,7 @@ import { openLogs } from "../dialogs/logs"
 import { openThemePicker } from "../dialogs/theme-picker"
 import { openModelPicker } from "../dialogs/model-picker"
 import { openEikonPicker } from "../dialogs/eikon-picker"
+import type { ParsedEikon } from "../components/avatar/eikon"
 import { openTextPrompt } from "../dialogs/text-prompt"
 import { openConfirm } from "../dialogs/confirm"
 import { openRollback } from "../dialogs/rollback"
@@ -62,6 +63,7 @@ export type SlashCtx = {
   sid: string
   title: string
   skin: SkinState
+  eikon?: ParsedEikon
 
   setQueue: React.Dispatch<React.SetStateAction<string[]>>
   setFocusRegion: (r: "input" | "content") => void
@@ -296,6 +298,9 @@ export function useSlash(c: SlashCtx): (cmd: SlashCommand, arg?: string) => void
             (n, m) => n + m.parts.filter(p => p.type === "tool").length, 0)
           const inputTok = msgs.reduce((n, m) => n + (m.usage?.input ?? 0), 0)
           const outputTok = msgs.reduce((n, m) => n + (m.usage?.output ?? 0), 0)
+          const avatarState = x.eikon?.states.get("working")
+            ?? x.eikon?.states.get("idle")
+          const avatar = avatarState?.frames[0]
           quit(renderer, x.sid, x.title, gw, {
             start: Date.now(),
             msgs: msgs.length,
@@ -304,6 +309,7 @@ export function useSlash(c: SlashCtx): (cmd: SlashCommand, arg?: string) => void
             outputTok,
             skin: x.skin.skin,
             model: x.info?.model,
+            avatar,
           }); return
         }
         case "queue":

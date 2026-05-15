@@ -81,12 +81,8 @@ export function banner(
     return " ".repeat(pad) + s
   }
 
-  // Only show avatar if terminal is tall enough (frame inner height
-  // must fit avatar + goodbye + stats + resume with some margin).
-  const showAvatar = avatar && inner.h >= avatar.length + 12
-
-  if (showAvatar) {
-    for (const row of avatar!) content.push(center(`${cyan}${row}${reset}`))
+  if (avatar) {
+    for (const row of avatar) content.push(center(`${cyan}${row}${reset}`))
     content.push("")
   }
 
@@ -153,10 +149,8 @@ function fallback(
   const empty = pad("")
   const lines: string[] = [top, empty]
 
-  const showAvatar = avatar && (lines.length + avatar.length + 12) <= 40
-
-  if (showAvatar) {
-    for (const row of avatar!) lines.push(pad(`${cyan}${row}${reset}`))
+  if (avatar) {
+    for (const row of avatar) lines.push(pad(`${cyan}${row}${reset}`))
     lines.push(empty)
   }
 
@@ -187,6 +181,8 @@ function fallback(
   return lines.join("\n")
 }
 
+const MIN_ROWS_FOR_AVATAR = 35
+
 export function quit(
   renderer: { destroy: () => void },
   sid?: string,
@@ -208,8 +204,11 @@ export function quit(
     const otok = stats && stats.outputTok && stats.outputTok > 0 ? tok(stats.outputTok) : ""
     const m = stats?.model ?? ""
     const t = title ? title.slice(0, 60) : ""
+    const avatar = (process.stdout.rows ?? 0) >= MIN_ROWS_FOR_AVATAR
+      ? stats?.avatar
+      : undefined
     writeSync(1, "\x1b[2J\x1b[H")
-    writeSync(1, "\n" + banner(g, d, n, t, sid, m, tools, itok, otok, stats?.avatar) + "\n")
+    writeSync(1, "\n" + banner(g, d, n, t, sid, m, tools, itok, otok, avatar) + "\n")
   }
   process.exit(0)
 }

@@ -51,3 +51,29 @@ test("banner shows goodbye and resume", () => {
   expect(out).toContain("Bye")
   expect(out).toContain("herm --resume s")
 })
+
+test("quit hides avatar when terminal is too short", () => {
+  const originalRows = process.stdout.rows
+  Object.defineProperty(process.stdout, "rows", { value: 30, writable: true, configurable: true })
+
+  const avatar = ["🙂", "🙂"]
+  const out = banner("Bye", "2m", "5", "title", "sid", undefined, undefined, undefined, undefined, avatar)
+
+  Object.defineProperty(process.stdout, "rows", { value: originalRows, writable: true, configurable: true })
+
+  expect(out).toContain("Bye")
+  expect(out).toContain("herm --resume sid")
+})
+
+test("quit shows avatar when terminal is tall enough", () => {
+  const originalRows = process.stdout.rows
+  Object.defineProperty(process.stdout, "rows", { value: 40, writable: true, configurable: true })
+
+  const avatar = ["🙂", "🙂"]
+  const out = banner("Bye", "2m", "5", "title", "sid", undefined, undefined, undefined, undefined, avatar)
+
+  Object.defineProperty(process.stdout, "rows", { value: originalRows, writable: true, configurable: true })
+
+  expect(out).toContain("🙂")
+  expect(out).toContain("Bye")
+})
