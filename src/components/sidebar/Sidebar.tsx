@@ -8,6 +8,7 @@ import type { Usage } from "../../types/message"
 import { useGitBranch, rtrunc } from "../../utils/git"
 import { Tail } from "../chat/ThoughtCloud"
 import { ContextGauge } from "./ContextGauge"
+import { OverheadGauge } from "./OverheadGauge"
 
 export type HiddenContext = {
   profile?: string
@@ -173,6 +174,7 @@ export const Sidebar = memo((props: {
         })() : null}
 
         <box flexGrow={1} />
+        <OverheadGauge info={info} usage={props.usage} width={INNER} />
         <ContextGauge info={info} usage={props.usage} width={INNER} />
       </box>
     </box>
