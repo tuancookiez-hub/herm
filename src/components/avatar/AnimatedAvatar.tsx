@@ -32,14 +32,8 @@ export const AnimatedAvatar = memo(({ state = "idle", eikon, onHold }: {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const holdRef = useRef(onHold); holdRef.current = onHold
 
-  const clip = eikon?.states.get(state) ?? STATE_FRAMES[state]
-  const { fps } = clip
-  const loopFrom = (clip as any).loopFrom ?? (clip as any).loop_from ?? 0
-  // FrameData stores braille art as a single string with newlines;
-  // AnimatedAvatar expects string[][] (one string per row).
-  const frames: string[][] = (clip as any).frames.map(
-    (f: any) => typeof f === "string" ? f : (f.data ?? "").split("\n")
-  )
+  const clip: EikonState = eikon?.states.get(state) ?? STATE_FRAMES[state]
+  const { frames, fps, loopFrom } = clip
   const count = frames.length
 
   useEffect(() => {
