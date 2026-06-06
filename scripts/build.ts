@@ -17,7 +17,7 @@
 // so they're absolute at runtime regardless of cwd.
 
 import { $ } from "bun"
-import { rmSync, chmodSync } from "node:fs"
+import { rmSync, chmodSync, cpSync } from "node:fs"
 import pkg from "../package.json" with { type: "json" }
 
 rmSync("dist", { recursive: true, force: true })
@@ -130,16 +130,17 @@ await Bun.write("dist/package.json", JSON.stringify({
   ),
 }, null, 2) + "\n")
 
-await $`cp README.md LICENSE dist/`
+cpSync("README.md", "dist/README.md")
+cpSync("LICENSE", "dist/LICENSE")
 // Runtime dynamic-import assets. Bun does not include variable imports
 // like import(`./themes/${name}.json`) in the bundle, so the published
 // package must ship the JSON bodies beside index.js.
-await $`cp -r src/theme/themes dist/themes`
+cpSync("src/theme/themes", "dist/themes", { recursive: true })
 // Runtime fs-read assets (eikon avatars). These aren't `with {type:
 // "file"}` imports — listEikons() readdirs the directory — so the
 // directory has to ship alongside index.js. bundled.ts resolves it
 // by walking up from import.meta.dir, which in the bundle is dist/.
-await $`cp -r assets dist/`
+cpSync("assets", "dist/assets", { recursive: true })
 
 const sizes = result.outputs
   .map(o => [o.path.replace(/^.*\/dist\//, ""), (o.size / 1024).toFixed(0) + " KB"])
