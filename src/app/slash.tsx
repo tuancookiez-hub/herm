@@ -44,6 +44,7 @@ import type { SessionInfo, TranscriptMessage, ImageAttachResponse } from "../con
 import type { Message, Usage } from "../types/message"
 import { text as msgText } from "../types/message"
 import type { useSession } from "./useSession"
+import type { SessionCapabilities } from "./sessionCapabilities"
 
 export type SlashCtx = {
   dispatch: React.Dispatch<Action>
@@ -58,7 +59,7 @@ export type SlashCtx = {
    *  gateway session.undo hard-deletes with no unrevert. */
   undone: RefObject<Message[][]>
 
-  ready: boolean
+  capabilities: SessionCapabilities
   info: SessionInfo | null
   sid: string
   title: string
@@ -143,15 +144,8 @@ export function useSlash(c: SlashCtx): (cmd: SlashCommand, arg?: string) => void
       .catch((e: Error) => toast.show({ variant: "error", message: e.message }))
   }, [gw, toast])
 
-  // Compress wrapper — re-hydrates transcript + session info from the
-  // RPC response. Gateway-side `agent._compress_context` ends the old
-  // SessionDB session and opens a continuation with a new session_id;
-  // without dispatching `messages` here, `turn.messages` stays stuck on
-  // the pre-compaction list until the user reopens the session, at
-  // which point the old messages vanish, reading as corruption.
-  // Mirrors Ink TUI (ui-tui/src/app/slash/commands/session.ts). Upstream
-  // also emits status.update{kind:"compressing"} events that already
-  // feed the status bar via gatewayEvents.ts.
+  // Manual compression mutates server context only; keep the live chat
+  // transcript visually stable, matching auto-compression.
   const runCompress = useCallback(async () => {
     toast.show({ variant: "info", message: "Compressing session…" })
     const r = await ctx.current.session.compress()
@@ -169,9 +163,6 @@ export function useSlash(c: SlashCtx): (cmd: SlashCommand, arg?: string) => void
       return { ...(base ?? { input: 0, output: 0, total: 0 }),
                context_used: r.after_tokens, context_max: max }
     })
-    if (Array.isArray(r.messages)) {
-      ctx.current.dispatch({ kind: "load", messages: transcriptToMessages(r.messages) })
-    }
     if (!r.summary) return
     const s = r.summary
     if (s.noop) {
@@ -472,7 +463,7 @@ export function useSlash(c: SlashCtx): (cmd: SlashCommand, arg?: string) => void
           return
       }
     }
-    if (c.target !== "gateway" || !x.sid) return
+    if (c.target !== "gateway" || !x.capabilities.canDispatchGatewayCommand) return
     const jump = TAB_SLASH[c.name]
     if (jump !== undefined && !arg) { x.goTo(jump.tab, jump.sub); return }
     const full = `/${c.name}${arg ? " " + arg : ""}`

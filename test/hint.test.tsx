@@ -2,10 +2,8 @@ import { describe, test, expect } from "bun:test"
 import { mountNode } from "./harness"
 import { HintBar } from "../src/ui/hint"
 
-// HintBar is rendered as a one-row footer below tab panes (docs/
-// nav_and_ui_standards.md § Hint Line). It should not wrap; pairs
-// render as `[key] verb` joined by two spaces; raw text passes through
-// unchanged so in-flight migrations can relocate hints verbatim.
+// HintBar stays one row below tab panes. Pairs render as `[key] verb`
+// joined by two spaces; raw text passes through unchanged.
 
 describe("HintBar", () => {
   test("raw text renders verbatim in a single row", async () => {

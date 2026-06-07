@@ -4,7 +4,6 @@ import { Cron } from "./Cron"
 import { Kanban } from "./Kanban"
 import { SubTabBar } from "../components/tabs/SubTabBar"
 import { SUB_TABS, AUTOMATION_TAB } from "../app/tabs"
-import { useKeys } from "../keys"
 
 type Props = {
   focused?: boolean
@@ -19,12 +18,11 @@ type Props = {
 // Each sub-tab owns its own keybindings via useKeyboard({focused}); the
 // group only forwards `focused` to whichever is active.
 export const Automation = memo((props: Props) => {
-  const keys = useKeys()
   const labels = SUB_TABS[AUTOMATION_TAB]
   useEffect(() => {
     if (props.sub >= labels.length) props.setSub(0)
   }, [props.sub, labels.length])
-  const hint = `${keys.print("tab.prev")}/${keys.print("tab.next")} group  ·  shift+←/→ sub`
+  const hint = "shift+←/→ sub"
   return (
     <box flexDirection="column" flexGrow={1} minWidth={0}>
       <SubTabBar tabs={labels} active={props.sub} onChange={props.setSub} hint={hint} />

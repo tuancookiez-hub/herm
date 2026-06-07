@@ -13,7 +13,6 @@ import type { RGBA } from "@opentui/core"
 import { useTheme } from "../../theme"
 import type { Theme } from "../../theme"
 import type { SlashCommand, SlashSource } from "../../app/slashCommands"
-import { sort } from "../../app/slashCommands"
 
 type Props = {
   readonly commands: ReadonlyArray<SlashCommand>
@@ -24,9 +23,9 @@ type Props = {
 
 type Row =
   | { type: "header"; cat: string }
-  | { type: "cmd"; cmd: SlashCommand; flat: number }
+  | { type: "cmd"; cmd: SlashCommand; idx: number }
 
-const MAX_VISIBLE = 14
+const MAX_VISIBLE = 10
 
 /** Color for the source badge. Returns null for sources that shouldn't render. */
 function badge(source: SlashSource, theme: Theme): RGBA | null {
@@ -54,30 +53,21 @@ export const SlashPopover = memo(({ commands: cmds, cursor, onCursor, onSelect }
     )
   }
 
-  // Build flat row list with category headers, stable order (sort by category).
   const rows = useMemo(() => {
-    const sorted = sort(cmds)
-    const result: Row[] = []
-    let flat = 0
-    let lastCat = ""
-    for (const cmd of sorted) {
-      if (cmd.category !== lastCat) {
-        result.push({ type: "header", cat: cmd.category })
-        lastCat = cmd.category
-      }
-      result.push({ type: "cmd", cmd, flat: flat++ })
-    }
-    return result
-  }, [cmds])
+    const start = Math.max(0, Math.min(cursor - 2, cmds.length - MAX_VISIBLE))
+    const items = cmds.slice(start, start + MAX_VISIBLE)
+    const cat = cmds[cursor]?.category ?? items[0]?.category ?? "Command"
+    return [
+      { type: "header", cat } satisfies Row,
+      ...items.map((cmd, i) => ({ type: "cmd" as const, cmd, idx: start + i })),
+    ]
+  }, [cmds, cursor])
 
-  // Find the row index of the cursor to drive the sliding window.
-  const cursorRow = rows.findIndex(r => r.type === "cmd" && r.flat === cursor)
-  const start = Math.max(0, Math.min(cursorRow - 2, rows.length - MAX_VISIBLE))
-  const visible = rows.slice(start, start + MAX_VISIBLE)
-  const clipped = rows.length > MAX_VISIBLE
+  const start = rows.find(r => r.type === "cmd")?.idx ?? 0
+  const clipped = cmds.length > MAX_VISIBLE
   const above = clipped && start > 0
-  const below = clipped && start + MAX_VISIBLE < rows.length
-  const height = visible.length + 2 + (above ? 1 : 0) + (below ? 1 : 0)
+  const below = clipped && start + MAX_VISIBLE < cmds.length
+  const height = rows.length + 2 + (above ? 1 : 0) + (below ? 1 : 0)
 
   return (
     <box
@@ -94,7 +84,7 @@ export const SlashPopover = memo(({ commands: cmds, cursor, onCursor, onSelect }
           <text fg={theme.textMuted}>↑ more</text>
         </box>
       ) : null}
-      {visible.map((row) => {
+      {rows.map((row) => {
         if (row.type === "header") {
           return (
             <box key={`h-${row.cat}`} height={1} paddingLeft={1}>
@@ -107,16 +97,16 @@ export const SlashPopover = memo(({ commands: cmds, cursor, onCursor, onSelect }
           )
         }
 
-        const active = row.flat === cursor
+        const active = row.idx === cursor
         const color = badge(row.cmd.source, theme)
 
         return (
           <box
-            key={`c-${row.cmd.name}`}
+            key={`c-${row.idx}-${row.cmd.name}`}
             height={1}
             flexDirection="row"
             backgroundColor={active ? theme.backgroundElement : undefined}
-            onMouseOver={() => onCursor(row.flat)}
+            onMouseOver={() => onCursor(row.idx)}
             onMouseDown={() => onSelect(row.cmd)}
             paddingLeft={2}
             paddingRight={1}

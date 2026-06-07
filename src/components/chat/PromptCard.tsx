@@ -19,6 +19,7 @@ import { LEFT_BAR } from "../../ui/borders"
 import type { ParsedKey, SubmitEvent } from "@opentui/core"
 import { useTheme } from "../../theme"
 import { useGateway } from "../../context/gateway"
+import { mkApproval, remember } from "../../context/approval-memory"
 import type { PromptPart, PromptReq, Part } from "../../types/message"
 
 export type PromptCardHandle = {
@@ -67,13 +68,19 @@ const Pill = (p: { on: boolean; hot: string; label: string; onPick: () => void }
   )
 }
 
-const CHOICES = ["once", "session", "always", "deny"] as const
+const CHOICES = ["once", "session", "never", "deny"] as const
 type Choice = typeof CHOICES[number]
 const LABELS: Record<Choice, string> = {
   once: "Allow once",
   session: "Allow this session",
-  always: "Always allow",
+  never: "Never ask",
   deny: "Deny",
+}
+const RESPOND: Record<Choice, string> = {
+  once: "once",
+  session: "session",
+  never: "always",
+  deny: "deny",
 }
 
 const Approval = forwardRef<PromptCardHandle, {
@@ -88,10 +95,13 @@ const Approval = forwardRef<PromptCardHandle, {
   const [note, setNote] = useState("")
   const done = useRef(false)
 
+  const prompt = mkApproval(p.req)
+
   const send = (c: Choice) => {
     if (done.current) return
     done.current = true
-    void gw.request("approval.respond", { choice: c }).catch(() => {})
+    if (c === "never") remember(prompt)
+    void gw.request("approval.respond", { choice: RESPOND[c] }).catch(() => {})
     p.onAnswer(LABELS[c], c !== "deny")
   }
 
@@ -134,6 +144,7 @@ const Approval = forwardRef<PromptCardHandle, {
         <box flexDirection="row" gap={1} height={1}>
           <text fg={theme.warning}>△</text>
           <text fg={theme.text}>Permission required</text>
+          <text fg={theme.textMuted}>· {prompt.question}</text>
         </box>
         <box flexDirection="row" gap={1} paddingLeft={2} minHeight={1}>
           <text fg={theme.textMuted}>#</text>
@@ -174,6 +185,9 @@ const Approval = forwardRef<PromptCardHandle, {
                   onPick={() => send(c)} />
           ))}
           <Pill on={false} hot="s" label="Steer" onPick={() => { setSteering(true); setNote("") }} />
+          <box height={1}>
+            <text fg={theme.textMuted}>subject: {prompt.subject}</text>
+          </box>
           <box flexGrow={1} />
           <box height={1}>
             <text fg={theme.textMuted}>←/→ · enter · s steer · esc deny</text>

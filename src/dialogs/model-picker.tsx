@@ -96,10 +96,18 @@ const ModelPickerDialog = (props: Props) => {
   }
 
   const p = data.providers?.find(pp => pp.slug === provider)
-  const options: SelectOption[] = (p?.models ?? []).map(m => ({
-    title: m,
-    value: m,
-  }))
+  const options: SelectOption[] = (p?.models ?? []).map(m => {
+    const caps = p?.capabilities?.[m]
+    const badges = [
+      caps?.fast ? "fast" : "",
+      caps?.reasoning ? "reasoning" : "",
+    ].filter(Boolean)
+    return {
+      title: m,
+      value: m,
+      hint: badges.length > 0 ? badges.join(" · ") : undefined,
+    }
+  })
 
   return (
     <DialogSelect

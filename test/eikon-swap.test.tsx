@@ -53,7 +53,7 @@ run("chafa↔native: chafa-only rows appear/disappear immediately on swap", asyn
   seed("swap", "native")
   prefs.set("eikon", "swap")
   prefs.set("eikonRasterizer", "native")
-  await using t = await mountNode(<EikonGroup focused sub={0} setSub={() => {}} />, { width: 180, height: 60 })
+  await using t = await mountNode(<EikonGroup focused sub={1} setSub={() => {}} />, { width: 180, height: 60 })
   await until(t, () => t.frame().includes("native ▸"))
   // fill/dither are chafa-only; flip/contrast are now studio-owned
   // HEAD rows so they're always present.
@@ -78,7 +78,7 @@ run("chafa↔native: chafa-only rows appear/disappear immediately on swap", asyn
 run("Esc in a prompt dialog does NOT fall through to discard()", async () => {
   seed("esc", "native")
   prefs.set("eikon", "esc")
-  await using t = await mountNode(<EikonGroup focused sub={0} setSub={() => {}} />, { width: 180, height: 60 })
+  await using t = await mountNode(<EikonGroup focused sub={1} setSub={() => {}} />, { width: 180, height: 60 })
   await until(t, () => t.frame().includes("rasterizer"))
 
   // Make dirty first so discard() would actually fire if Esc leaked.
@@ -106,7 +106,7 @@ run("Esc in a prompt dialog does NOT fall through to discard()", async () => {
 run("knob rows: Space and Enter both act per nav.md; click = activate", async () => {
   seed("kact", "native")
   prefs.set("eikon", "kact")
-  await using t = await mountNode(<EikonGroup focused sub={0} setSub={() => {}} />, { width: 180, height: 60 })
+  await using t = await mountNode(<EikonGroup focused sub={1} setSub={() => {}} />, { width: 180, height: 60 })
   await until(t, () => t.frame().includes("invert"))
 
   // toggle: Space flips, Enter also flips (only one semantic).

@@ -1,13 +1,7 @@
-// Regression: /compress must re-hydrate the local transcript from the
-// gateway's response.  Without this, `turn.messages` stays stuck on the
-// pre-compaction list until the user reopens the session — at which
-// point the old messages vanish from the UI, reading as data loss.
-//
-// Upstream session.compress returns { messages, info, usage, summary, ... };
-// the gateway also rotates session_id (agent._compress_context ends the
-// old DB session and opens a continuation).  See the compress handler
-// in ui-tui/src/app/slash/commands/session.ts for the canonical flow
-// we mirror.
+// Regression: /compress must preserve the live visual transcript, matching
+// auto-compression. The gateway returns compacted `messages`, but replacing
+// `turn.messages` with that response makes the chat appear to delete the
+// earlier conversation immediately after a manual compress.
 
 import { describe, expect, test } from "bun:test"
 import { act } from "react"
@@ -51,35 +45,32 @@ const run = async (t: Awaited<ReturnType<typeof mount>>) => {
 }
 
 describe("/compress", () => {
-  test("re-hydrates transcript from rpc response messages", async () => {
+  test("preserves visible transcript when rpc returns compacted messages", async () => {
     const gw = mkGw()
     const t = await mount({ gw, launch: { mode: "resume", sid: "pre-sid", splash: false } })
     await until(t, () => t.frame().includes("draft the rfc"))
 
     await run(t)
 
-    // Transcript reflects the compacted history: marker row present,
-    // the now-removed pre-compaction turn ("draft the rfc") is gone.
-    await until(t, () => t.frame().includes("MARKER_POST_COMPACT_USER"))
-    expect(t.frame()).not.toContain("draft the rfc")
+    await until(t, () => t.frame().includes("Compacted 4→3 messages"))
+    expect(t.frame()).toContain("draft the rfc")
+    expect(t.frame()).not.toContain("MARKER_POST_COMPACT_USER")
 
     t.destroy()
   })
 
-  test("absorbs info.session_id rotation", async () => {
+  test("keeps follow-up RPCs on the active gateway session", async () => {
     const gw = mkGw()
     const t = await mount({ gw, launch: { mode: "resume", sid: "pre-sid", splash: false } })
     await until(t, () => t.frame().includes("draft the rfc"))
 
     await run(t)
-    await until(t, () => t.frame().includes("MARKER_POST_COMPACT_USER"))
+    await until(t, () => t.frame().includes("Compacted 4→3 messages"))
 
-    // setInfo() fed the new session_id; follow-up RPCs target the
-    // continuation, not the ended parent. session.title after /compress
-    // is the cheapest probe — its response flows back into state.
     await act(async () => { await t.keys.typeText("/title After Compress") })
     act(() => t.keys.pressEnter())
     await until(t, () => t.gw.last("session.title")?.params.title === "After Compress")
+    expect(t.gw.last("session.title")?.params.session_id).toBe("pre-sid")
 
     t.destroy()
   })

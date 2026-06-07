@@ -82,9 +82,9 @@ export function useListKeys(o: ListOpts & {
 //   <scrollbox ref={follow.ref}>
 //     <Row id={follow.id(i)} ... />
 //
-export function useFollow(prefix: string) {
+export function useFollow(prefix: string, key?: (i: number) => string | number | undefined) {
   const ref = useRef<ScrollBoxRenderable | null>(null)
-  const id = (i: number) => `${prefix}-row-${i}`
+  const id = (i: number) => `${prefix}-row-${key?.(i) ?? i}`
   return {
     ref, id,
     opts: {

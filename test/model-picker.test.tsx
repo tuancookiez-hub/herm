@@ -4,6 +4,7 @@ import { mountNode, until } from "./harness"
 import { useDialog } from "../src/ui/dialog"
 import { useGateway } from "../src/context/gateway"
 import { openModelPicker } from "../src/dialogs/model-picker"
+import type { ModelOptionsResponse } from "../src/context/wire"
 import { useEffect } from "react"
 
 const Open = () => {
@@ -17,7 +18,14 @@ const OPTIONS = {
   provider: "anthropic",
   model: "claude-3",
   providers: [
-    { slug: "anthropic", name: "Anthropic", is_current: true, total_models: 2, models: ["claude-3", "claude-4"] },
+    {
+      slug: "anthropic",
+      name: "Anthropic",
+      is_current: true,
+      total_models: 2,
+      models: ["claude-3", "claude-4"],
+      capabilities: { "claude-4": { fast: true, reasoning: true } },
+    },
     { slug: "openai", name: "OpenAI", total_models: 1, models: ["gpt-4"] },
   ],
 }
@@ -116,6 +124,65 @@ describe("model-picker", () => {
 
     const row = t.frame().split("\n").find(l => l.includes("shared")) ?? ""
     expect(row).not.toContain("●")
+    t.destroy()
+  })
+  test("accepts provider capability metadata with optional neighbors", () => {
+    const opts: ModelOptionsResponse = {
+      provider: "fastlabs",
+      model: "flash-reasoner",
+      providers: [
+        {
+          slug: "fastlabs",
+          name: "Fast Labs",
+          total_models: 2,
+          authenticated: true,
+          auth_type: "api_key",
+          key_env: "FASTLABS_API_KEY",
+          free_tier: true,
+          unavailable_models: ["legacy-slow"],
+          models: ["flash-reasoner", "legacy-slow"],
+          capabilities: {
+            "flash-reasoner": { fast: true, reasoning: true },
+            "legacy-slow": {},
+          },
+          pricing: {
+            "flash-reasoner": { input: "$0.20/M", output: "$0.80/M", cache: null, free: false },
+          },
+        },
+        {
+          slug: "compat",
+          name: "Compat Provider",
+          models: ["plain-model"],
+        },
+      ],
+    }
+
+    const provider = opts.providers?.[0]
+    const compat = opts.providers?.[1]
+
+    expect(provider?.capabilities?.["flash-reasoner"]?.fast).toBe(true)
+    expect(provider?.capabilities?.["flash-reasoner"]?.reasoning).toBe(true)
+    expect(provider?.authenticated).toBe(true)
+    expect(provider?.pricing?.["flash-reasoner"].cache).toBeNull()
+    expect(provider?.unavailable_models).toContain("legacy-slow")
+    expect(compat?.capabilities?.["plain-model"]?.fast).toBeUndefined()
+    expect(compat?.pricing?.["plain-model"]).toBeUndefined()
+  })
+
+  test("model step annotates fast and reasoning capabilities", async () => {
+    const t = await mountNode(<Open />, {
+      handlers: { "model.options": () => OPTIONS },
+    })
+    await until(t, () => t.frame().includes("Anthropic"))
+
+    act(() => t.keys.pressEnter())
+    await until(t, () => t.frame().includes("claude-4"))
+
+    const claude3 = t.frame().split("\n").find(l => l.includes("claude-3")) ?? ""
+    const claude4 = t.frame().split("\n").find(l => l.includes("claude-4")) ?? ""
+    expect(claude3).not.toContain("fast")
+    expect(claude3).not.toContain("reasoning")
+    expect(claude4).toContain("fast · reasoning")
     t.destroy()
   })
 

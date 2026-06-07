@@ -38,6 +38,7 @@ profiles/
 .beads-credential-key
 
 # scratch
+.ignore/
 issues.jsonl
 *.bak
 *.code-workspace

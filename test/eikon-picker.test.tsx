@@ -25,11 +25,11 @@ describe("EikonPickerDialog", () => {
     await until(t, () => t.frame().includes("tiny-guy"))
 
     const f = t.frame()
-    // list row: name, author, state count, dimensions
+    // list row: name, author, state count; fixed eikon dimensions are omitted.
     expect(f).toContain("tiny-guy")
     expect(f).toContain("tester")
     expect(f).toContain("1 states")
-    expect(f).toContain("10×3")
+    expect(f).not.toContain("10×3")
     // preview: frame content rendered via AnimatedAvatar
     expect(f).toMatch(/\[o_o\]|\[O_O\]/)
     expect(picked).toBe("")

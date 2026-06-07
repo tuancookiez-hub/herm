@@ -20,6 +20,7 @@ import { editInEditor } from "../utils/editor"
 import { Selection } from "../utils/selection"
 import { useKeys, conflicts } from "../keys"
 import { print as chordPrint } from "../keys/chord"
+import { isDegradedMouseInput } from "./mouseFilter"
 import type { ComposerHandle } from "../components/chat/Composer"
 import { isVoiceToggleKey } from "../voice/platform"
 import type { VoiceKey } from "../voice/types"
@@ -101,6 +102,11 @@ export function useAppKeys(o: Opts) {
 
   useKeyboard((key) => {
     const c = o.composer.current
+
+    if (isDegradedMouseInput(key)) {
+      key.stopPropagation()
+      return
+    }
 
     // An active text selection pre-empts every shell binding: Esc
     // clears it (not the dialog, not the interrupt counter), Ctrl+C

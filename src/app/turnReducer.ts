@@ -39,7 +39,7 @@ export type Action =
   | { kind: "subagent"; event: "start" | "thinking" | "tool" | "progress" | "complete"; payload: SubagentPayload }
   | { kind: "prompt"; id: string; req: PromptReq }
   | { kind: "prompt.answered"; id: string; label: string; ok: boolean }
-  | { kind: "error"; text: string }
+  | { kind: "error"; text: string; fatal?: boolean }
   | { kind: "interrupt.notice"; text: string }
 
 export function turnReducer(state: TurnState, a: Action): TurnState {
@@ -175,14 +175,17 @@ export function turnReducer(state: TurnState, a: Action): TurnState {
         })),
       }
 
-    case "error":
+    case "error": {
+      const msg = systemMessage(`Error: ${sanitize(a.text)}`)
+      if (a.fatal === false) return { ...state, messages: [...state.messages, msg] }
       return {
         ...state,
         streaming: false,
         hasContent: false,
         toolActive: false,
-        messages: [...state.messages, systemMessage(`Error: ${sanitize(a.text)}`)],
+        messages: [...state.messages, msg],
       }
+    }
 
     case "interrupt.notice": {
       const clean = sanitize(a.text)

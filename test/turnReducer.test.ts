@@ -159,6 +159,18 @@ describe("turnReducer", () => {
     expect(p.type === "text" && p.content).toContain("gateway died")
   })
 
+  test("nonfatal error keeps active stream alive", () => {
+    const s = run([
+      { kind: "message.start" },
+      { kind: "error", text: "compression warning", fatal: false },
+      { kind: "tool.start", id: "t1", name: "read_file" },
+    ])
+    expect(s.streaming).toBe(true)
+    expect(s.toolActive).toBe(true)
+    const p = last(s).parts[0]
+    expect(p.type === "tool" && p.name).toBe("read_file")
+  })
+
   test("reset clears everything", () => {
     const s = run([
       { kind: "user", text: "x" },

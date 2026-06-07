@@ -15,7 +15,7 @@ import { useEffect, useState, useRef, useMemo, memo, type Dispatch, type SetStat
 import { CORNERS } from "../ui/borders"
 import { useKeyboard } from "@opentui/react"
 
-import type { Message } from "../types/message"
+import type { Message, Usage } from "../types/message"
 import { text as msgText } from "../types/message"
 import { makeSource, type ToolInfo, type HermesConfig, type ToolsInfo } from "../service/hermes-home"
 import type { SessionInfo } from "../context/wire"
@@ -47,14 +47,17 @@ type Props = {
   messages?: Message[]
   sessionStart?: number
   info?: SessionInfo
+  usage?: Usage
   focused?: boolean
 }
 
 type Wire = { input: number; output: number; total: number; calls: number }
+type ContextMeter = { max: number; used?: number }
 
-// Conservative fallback when gateway hasn't surfaced info.context_max
-// yet (fresh session, pre-session.info). Real value comes from
-// SessionInfo.context_max on the wire.
+// Last-resort fallback when neither the gateway (info.context_max) nor
+// config (model.context_length) has surfaced a window yet. Real value
+// comes from SessionInfo.context_max on the wire; the configured
+// model.context_length is preferred over this constant.
 const DEFAULT_CTX = 128_000
 const COLS = 16
 
@@ -74,6 +77,8 @@ export const SLOTS = [
   "project",
   "meta",
   "other",
+  "unknown",
+  "overage",
 ] as const
 
 const SLOT: Record<string, number> = Object.fromEntries(SLOTS.map((id, i) => [id, i]))
@@ -286,7 +291,7 @@ const FreePanel = memo(({ seg, theme, ctxLen, comp, onEditThreshold }: {
 const NO_MESSAGES: readonly Message[] = Object.freeze([])
 
 const toolsFromInfo = (info?: SessionInfo | null): ToolsInfo | null => {
-  if (!info?.tools) return null
+  if (!info || info.tools === undefined) return null
   const tools = Object.entries(info.tools).flatMap(([group, names]) =>
     names.map(name => ({
       name,
@@ -294,11 +299,20 @@ const toolsFromInfo = (info?: SessionInfo | null): ToolsInfo | null => {
       paramsLength: group.length,
     })),
   )
-  if (tools.length === 0) return null
   return { source: makeSource("state.db", "session.info"), tools }
 }
 
-export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focused }: Props) => {
+const configuredContextLength = (config: HermesConfig | null): number | undefined => {
+  const n = config?.model?.context_length
+  return typeof n === "number" && n > 0 ? n : undefined
+}
+
+export const contextMeter = (usage: Usage | undefined, info: SessionInfo | undefined, config: HermesConfig | null): ContextMeter => ({
+  max: usage?.context_max ?? info?.usage?.context_max ?? info?.context_max ?? configuredContextLength(config) ?? DEFAULT_CTX,
+  used: usage?.context_used ?? info?.usage?.context_used ?? info?.context_used,
+})
+
+export const Context = memo(({ messages = NO_MESSAGES as Message[], info, usage, focused }: Props) => {
   const config = useHome("config")
   const memory = useHome("memory")
   const userProfile = useHome("userProfile")
@@ -308,8 +322,6 @@ export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focuse
   const systemPrompt = useHome("systemPrompt")
   const toolsInfo = useHome("toolsInfo")
   const soul = useHome("soul")
-  const recentSessions = useHome("recentSessions")
-  const liveSessions = useHome("liveSessions")
 
   const [wire, setWire] = useState<Wire>({ input: 0, output: 0, total: 0, calls: 0 })
   const wireRef = useRef(wire)
@@ -335,21 +347,12 @@ export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focuse
   }, [messages])
 
   // Derived
-  const session = recentSessions?.[0]
-  // Gateway's context_max is the authoritative runtime value. Fall back
-  // to DEFAULT_CTX only during the fresh-session window before
-  // session.info lands.
-  const ctxLen = info?.context_max ?? DEFAULT_CTX
-
-  const live = session
-    ? Object.values(liveSessions ?? {}).find(ls => ls.session_id === session.id)
-    : undefined
-
-  const lastPrompt = live?.last_prompt_tokens ?? 0
-  const fill = wire.calls > 0 ? wire.input : lastPrompt > 0 ? lastPrompt : (session?.input_tokens ?? 0)
-  const cumulative = wire.calls === 0 && lastPrompt === 0 && (session?.input_tokens ?? 0) > 0
-  const output = wire.calls > 0 ? wire.output : (session?.output_tokens ?? 0)
-  const pct = ctxLen > 0 ? Math.round((fill / ctxLen) * 100) : 0
+  const meter = contextMeter(usage, info, config ?? null)
+  const ctxLen = meter.max
+  const used = meter.used
+  const reliable = typeof used === "number"
+  const output = wire.output
+  const pct = reliable && ctxLen > 0 ? Math.round((used / ctxLen) * 100) : 0
 
   // Threshold marker inputs. `config.compression.threshold` is the
   // single source of truth; server reads the same key.
@@ -367,22 +370,27 @@ export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focuse
   const sections = useMemo(() => parse(promptText), [promptText])
   const convTok = useMemo(() => est(messages.filter(m => m.role !== "system").map(m => msgText(m)).join("")), [messages])
 
-  const currentTools = useMemo(() => toolsFromInfo(info) ?? toolsInfo, [info, toolsInfo])
+  const currentTools = useMemo(() => {
+    const liveTools = toolsFromInfo(info)
+    if (liveTools) return liveTools
+    if (info?.tools !== undefined) return liveTools
+    return toolsInfo
+  }, [info, toolsInfo])
 
   const top = useMemo(() => build({
     contextLength: ctxLen,
-    inputTokens: fill,
+    usedTokens: used,
     sections,
     conversationTokens: convTok,
     tools: currentTools?.tools ?? [],
-  }), [ctxLen, fill, sections, convTok, currentTools])
+  }), [ctxLen, used, sections, convTok, currentTools])
 
   // Current view: top-level or drilled
   const drilledGroup = drilled ? top.find(s => s.id === drilled) : null
   const view = drilledGroup ? drill(drilledGroup) : top
   const grid = useMemo(
-    () => buildCells(view, drilledGroup ? drilledGroup.children?.[0]?.id ?? "other" : "free"),
-    [view, drilledGroup],
+    () => buildCells(view, drilledGroup ? drilledGroup.children?.[0]?.id ?? "other" : reliable ? "free" : "unknown"),
+    [view, drilledGroup, reliable],
   )
 
   // Helpers
@@ -514,8 +522,10 @@ export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focuse
         <strong>Breakdown</strong>
         {drilledGroup ? (
           <span fg={theme.info}> · {drilledGroup.label} ({fmt(drilledGroup.tokens)} tok)</span>
-        ) : (
+        ) : reliable ? (
           <span fg={theme.info}> (click group to expand)</span>
+        ) : (
+          <span fg={theme.warning}> · live usage unavailable · limit {fmt(ctxLen)}</span>
         )}
       </text>
       {view.filter(s => s.tokens > 0).map(s => (
@@ -528,18 +538,18 @@ export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focuse
       {output > 0 && !drilled ? (
         <text><span fg={theme.success}>◼</span> Output — {fmt(output)} tokens</text>
       ) : null}
-      <text>
-        <span fg={theme.textMuted}>◼ Beyond compression threshold ({Math.round(thresholdPct * 100)}%)</span>
-      </text>
+      {reliable && !drilled ? (
+        <text>
+          <span fg={theme.textMuted}>◼ Beyond compression threshold ({Math.round(thresholdPct * 100)}%)</span>
+        </text>
+      ) : null}
     </box>
   )
 
   const crumb = drilled
     ? `${drilledGroup?.label}${selected ? ` · ${findSeg(selected)?.label}` : ""}`
-    : wire.calls === 0 && fill === 0 ? "[no data]"
-    : cumulative ? "[cumulative — not current fill]"
-    : wire.calls === 0 && fill > 0 ? "[live session]"
-    : "↑↓ nav  ·  click a group to drill in"
+    : reliable ? "↑↓ nav  ·  click a group to drill in"
+    : "live usage unavailable · estimates shown with ~"
   const escHint = selected || drilled ? "  ·  Esc back" : ""
 
   const focus = selected || hovered
@@ -548,7 +558,7 @@ export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focuse
   return (
     <box flexDirection="column" flexGrow={1} minWidth={0}>
     <TabShell
-      title={`Context · ${fmt(fill)} / ${fmt(ctxLen)} (${pct}%)`}
+      title={reliable ? `Context · ${fmt(used)} / ${fmt(ctxLen)} (${pct}%)` : `Context · live usage unavailable · limit ${fmt(ctxLen)}`}
     >
       <box height={1}>
         {focusSeg ? (
@@ -562,7 +572,7 @@ export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focuse
         <box flexDirection="column" marginRight={2} flexShrink={0}>
           {/* Compression badge — shown inline above the grid when any
               compression events have fired this session. */}
-          {compressions > 0 ? (
+          {!drilled && compressions > 0 ? (
             <box height={1} marginBottom={1}>
               <text fg={theme.warning}>×{compressions} compressed</text>
             </box>
@@ -578,7 +588,7 @@ export const Context = memo(({ messages = NO_MESSAGES as Message[], info, focuse
                   // different segment lights both groups at once.
                   const hl = selected ? selected === cell.id : hovered === cell.id
                   // Past-threshold cells: ◼ in textMuted; hover still shows category color.
-                  const past = row * COLS + col >= thresholdIdx
+                  const past = !drilled && row * COLS + col >= thresholdIdx
                   const glyph = !past && cell.id === "free" ? "◻" : "◼"
                   return (
                     <box

@@ -6,10 +6,8 @@ import { useTheme } from "../theme"
 // flexGrow column with minWidth=0 so children can truncate instead of
 // forcing the panel wider than the terminal.
 //
-// Keybind hints do NOT live here — each tab owns a single <HintBar>
-// footer rendered below all its panes (docs/nav_and_ui_standards.md §
-// Hint Line). Multi-pane tabs otherwise rendered two competing header
-// hints with no room for either.
+// Keybind hints do NOT live here — each tab owns one <HintBar>
+// footer below its panes. Header hints compete for space.
 //
 // `focus` switches the border to theme.primary — used when a tab
 // hosts multiple panels and wants to show which has keyboard focus.
@@ -21,6 +19,7 @@ import { useTheme } from "../theme"
 
 export const TabShell = (props: {
   title: string
+  titleRight?: ReactNode
   error?: string | null
   focus?: boolean
   grow?: number
@@ -31,8 +30,13 @@ export const TabShell = (props: {
     <box flexDirection="column" flexGrow={props.grow ?? 1} flexBasis={0} minWidth={0} minHeight={0}
          border borderColor={props.focus ? theme.primary : theme.border}
          backgroundColor={theme.backgroundPanel} padding={1}>
-      <box height={1} overflow="hidden">
-        <text fg={theme.primary} wrapMode="none"><strong>{props.title}</strong></text>
+      <box height={1} overflow="hidden" flexDirection="row">
+        <box flexShrink={0} overflow="hidden">
+          <text fg={theme.primary} wrapMode="none"><strong>{props.title}</strong></text>
+        </box>
+        {props.titleRight
+          ? <box flexGrow={1} minWidth={0} overflow="hidden" justifyContent="flex-end">{props.titleRight}</box>
+          : null}
       </box>
       {props.error
         ? <box height={1}><text fg={theme.error}>{`⚠ ${props.error}`}</text></box>

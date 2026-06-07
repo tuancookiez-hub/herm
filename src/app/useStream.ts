@@ -62,6 +62,7 @@ export function useStream(c: Ctx) {
   // emitting after the monitor thread's InterruptedError has already
   // ended the turn.
   const interrupted = useRef(false)
+  const info = useRef(false)
 
   // Delta batching: streamed text/reasoning chunks accumulate in a
   // ref and flush at most once per 16ms. Every delta otherwise
@@ -103,6 +104,7 @@ export function useStream(c: Ctx) {
 
   const handle = useCallback((ev: GatewayEvent) => {
     const x = ctx.current
+    if (ev.type === "gateway.ready") info.current = false
     if (ev.session_id && x.sidRef.current && ev.session_id !== x.sidRef.current && !ev.type.startsWith("gateway.")) return
     // The agent's stream-retry loop (run_agent._call) classifies the
     // force-closed httpx socket from an interrupt as a transient drop
@@ -166,6 +168,9 @@ export function useStream(c: Ctx) {
         })
       },
       onStatus: (text) => x.setStatus(text),
+      onApprovalRemembered: () => {
+        void gw.request("approval.respond", { choice: "always" }).catch(() => {})
+      },
       onProcessNotification: (text) => {
         const n = procs.current
         n.texts.push(text)
@@ -175,6 +180,10 @@ export function useStream(c: Ctx) {
       onSkin: (s) => x.setSkin(deriveSkin(s)),
     })
     if (!action) return
+    if (ev.type === "session.info") {
+      if (info.current) return
+      info.current = true
+    }
     const d = deltas.current
     if (action.kind === "message.delta") {
       if (d.think) flush()

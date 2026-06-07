@@ -2,10 +2,8 @@ import { memo } from "react"
 import { useTheme } from "../../theme"
 
 // Shared horizontal tab strip. Top-level TabBar and per-group SubTabBar
-// both render this so the two levels read as the same control (see
-// docs/nav.md § Tab Bars) — they differ only in nav chord and hint text,
-// which callers supply. No digit prefix, no bullet; active entry gets a
-// bold label on a backgroundElement block, inactive entries are muted.
+// both render this; callers supply the nav chord and hint text. No digit
+// prefix or bullet; active entry gets a bold label on backgroundElement.
 // Keyboard lives in useAppKeys; this is click + paint only.
 
 type Props = {

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, memo } from "react"
 import { STATE_FRAMES, type AvatarState } from "./states"
 import type { ParsedEikon, EikonState } from "./eikon"
 import { useTheme } from "../../theme"
+import * as prefs from "../../context/preferences"
 import * as perf from "../../utils/perf"
 
 /**
@@ -36,11 +37,16 @@ export const AnimatedAvatar = memo(({ state = "idle", eikon, onHold }: {
   const { frames, fps, loopFrom } = clip
   const count = frames.length
 
+  const animate = prefs.usePref("animations") !== false
+  const targetFps = prefs.usePref("targetFps") ?? 30
+  const dt = 1000 / Math.max(1, Math.min(fps, targetFps))
+
   useEffect(() => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null }
     setFrame(0)
-    if (count < 2) return
-    const dt = 1000 / fps
+    if (!animate || count < 2) return
+    perf.count("avatar:timer:start")
+    if (process.env.HERM_TEST_PERF === "1") globalThis.__hermAvatarTimerStarts = (globalThis.__hermAvatarTimerStarts ?? 0) + 1
     let idx = 0
 
     const tick = () => {
@@ -55,8 +61,14 @@ export const AnimatedAvatar = memo(({ state = "idle", eikon, onHold }: {
     }
 
     timer.current = setTimeout(tick, dt)
-    return () => { if (timer.current) clearTimeout(timer.current) }
-  }, [state, count, fps, loopFrom])
+    return () => {
+      if (timer.current) {
+        clearTimeout(timer.current)
+        timer.current = null
+        perf.count("avatar:timer:stop")
+      }
+    }
+  }, [state, count, loopFrom, animate, dt])
 
   const end = perf.mark("avatar:render")
   const lines = frames[Math.min(frame, count - 1)] ?? []

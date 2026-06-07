@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Spawn a command on a pty of a given size, discarding output.
-Used by scripts/e2e-eikon-studio.sh to give herm a ≥120-col tty without
-needing asciinema / a real terminal."""
+Useful for CONTROL-driven herm checks that need a real terminal size."""
 import os, sys, pty, fcntl, struct, termios, signal
 
 cols = int(os.environ.get("COLS", "200"))

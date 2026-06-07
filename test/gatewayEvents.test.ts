@@ -115,11 +115,11 @@ describe("mapEvent", () => {
     expect(formatProcessNotification("weird shape")).toBe("weird shape")
   })
 
-  test("gateway.stderr: errorish → error (full line, no slice); benign → null", () => {
-    expect(map({ type: "gateway.stderr", payload: { line: "⚠️ API call failed (HTTP 404)" } }).action?.kind)
-      .toBe("error")
-    expect(map({ type: "gateway.stderr", payload: { line: "Traceback (most recent call last):" } }).action?.kind)
-      .toBe("error")
+  test("gateway.stderr: errorish → nonfatal error (full line, no slice); benign → null", () => {
+    expect(map({ type: "gateway.stderr", payload: { line: "⚠️ API call failed (HTTP 404)" } }).action)
+      .toMatchObject({ kind: "error", fatal: false })
+    expect(map({ type: "gateway.stderr", payload: { line: "Traceback (most recent call last):" } }).action)
+      .toMatchObject({ kind: "error", fatal: false })
     expect(map({ type: "gateway.stderr", payload: { line: "INFO: loaded 5 skills" } }).action)
       .toBeNull()
     // Long tracebacks are passed through verbatim — the /logs ring (gw.tail)
@@ -127,7 +127,7 @@ describe("mapEvent", () => {
     // context to an arbitrary slice either.
     const long = "Traceback: " + "x".repeat(500)
     expect(map({ type: "gateway.stderr", payload: { line: long } }).action)
-      .toEqual({ kind: "error", text: long })
+      .toEqual({ kind: "error", text: long, fatal: false })
   })
 
   test("gateway.start_timeout / protocol_error surface", () => {

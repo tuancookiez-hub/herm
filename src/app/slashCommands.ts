@@ -29,8 +29,8 @@ export type SlashCommand = {
 /**
  * Names of purely client-side commands — intercepted before gateway dispatch.
  * These are always treated as local regardless of what the gateway returns.
- * Anything that must act on the *live* gateway session (not the slash-worker
- * subprocess) belongs here — see docs/slash-parity-audit.md.
+ * Anything that must act on the *live* gateway session belongs here; the
+ * slash-worker subprocess cannot service it.
  */
 export const LOCAL_NAMES = new Set([
   "clear", "new", "theme", "help", "keys", "logs", "title",

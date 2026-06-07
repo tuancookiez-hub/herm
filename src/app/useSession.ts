@@ -22,14 +22,8 @@ const spec = (row: ReturnType<typeof byId>) => {
   return `${row.model} --provider ${row.billing_provider}`
 }
 
-/** session.compress response shape — see upstream fc7f55f49.
- *
- *  `messages` + `info` carry the post-compaction transcript and fresh
- *  session metadata; the gateway rewrites history in place and rotates
- *  session_id (agent._compress_context ends the old DB session and opens
- *  a continuation). Callers MUST re-hydrate local transcript state from
- *  `messages` — otherwise the TUI keeps the pre-compaction list and the
- *  next resume snaps it to the compacted history, looking like data loss. */
+/** session.compress response shape. `messages` is compacted server context;
+ *  the live chat transcript intentionally stays visually unchanged. */
 export type CompressResult = {
   status?: "compressed" | "skipped"
   removed?: number
@@ -87,12 +81,12 @@ export function useSession(): SessionOps {
     // pass exact ids on purpose; boot() resolves tips itself.
     const target = normalize(sid)
     const row = byId(target)
+    const model = spec(row)
+    if (model) await gw.request("config.set", { session_id: undefined, key: "model", value: model })
     const res = await gw.request<SessionResumeResponse>("session.resume", { session_id: target })
     const id = res.session_id
     gw.setSession(id)
     preferences.set("lastSessionId", res.resumed ?? target)
-    const model = spec(row)
-    if (model) await gw.request("config.set", { key: "model", value: model }).catch(() => {})
     const messages = res.messages?.length ? transcriptToMessages(res.messages) : []
     return { id, messages, info: res.info }
   }, [gw])

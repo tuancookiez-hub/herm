@@ -192,9 +192,9 @@ describe("tool/file-edit", () => {
   test("write_file renders generic write row", async () => {
     const t = await tool({
       type: "tool", id: "tw", name: "write_file", args: "",
-      preview: "docs/README.md", status: "done", duration: 9,
+      preview: "notes/README.md", status: "done", duration: 9,
     })
-    await until(t, () => t.frame().includes("Write docs/README.md"))
+    await until(t, () => t.frame().includes("Write notes/README.md"))
     expect(t.frame()).not.toContain("changed")
     expect(t.frame()).not.toContain("┃")
     t.destroy()

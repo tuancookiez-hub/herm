@@ -5,9 +5,31 @@
 // (sessions-db.ts SUB/CONT predicates) until quit. Parity with Ink
 // TUI's useSessionLifecycle.closeSession.
 
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { act } from "react"
 import { mount, until, MockGateway } from "./harness"
+import { openStateDb } from "./fixtures/state-db"
+import { resetDb } from "../src/service/sessions-db"
+
+const wipe = () => {
+  const db = openStateDb()
+  db.run("DELETE FROM messages")
+  db.run("DELETE FROM sessions")
+  db.close()
+  resetDb()
+}
+
+const seed = () => {
+  const db = openStateDb()
+  db.run("DELETE FROM messages")
+  db.run("DELETE FROM sessions")
+  db.run(`INSERT INTO sessions (id, source, model, billing_provider, started_at, message_count)
+    VALUES ('past', 'tui', 'gpt-5.5', 'openai-codex', 1000, 2)`)
+  db.close()
+  resetDb()
+}
+
+afterAll(wipe)
 
 describe("session.close", () => {
   test("/new closes the outgoing session", async () => {
@@ -79,23 +101,153 @@ describe("session.close", () => {
     t.destroy()
   })
 
+  test("switchSession preconfigures stored model before resume", async () => {
+    seed()
+    let prepped = false
+    const gw = new MockGateway({
+      "commands.catalog": () => ({ pairs: [["/resume", "resume session"]] }),
+      "session.create": () => ({ session_id: "old" }),
+      "config.set": p => {
+        prepped = p.value === "gpt-5.5 --provider openai-codex" && p.session_id === undefined
+        return { key: p.key, value: p.value, warning: "" }
+      },
+      "session.resume": p => ({
+        session_id: "live-past",
+        resumed: p.session_id,
+        messages: [{ role: "user", text: "hello" }],
+        info: {
+          model: "gpt-5.5",
+          session_id: "live-past",
+          tools: {},
+          skills: {},
+          usage: {
+            input: 0,
+            output: 0,
+            total: 0,
+            context_used: 110_000,
+            context_max: prepped ? 1_000_000 : 256_000,
+          },
+        },
+      }),
+    })
+    const t = await mount({ gw, launch: { mode: "new", splash: false } })
+    await until(t, () => t.frame().includes("Ready"))
+
+    await act(async () => { await t.keys.typeText("/resume past") })
+    act(() => t.keys.pressEnter())
+    await until(t, () => t.frame().includes("Ready") && t.frame().includes("hello"))
+
+    const ri = gw.calls.findIndex(c => c.method === "session.resume" && c.params.session_id === "past")
+    const ci = gw.calls.findIndex(c => c.method === "config.set" && c.params.value === "gpt-5.5 --provider openai-codex")
+    expect(ci).toBeGreaterThan(-1)
+    expect(ci).toBeLessThan(ri)
+    expect(t.frame()).toContain("110K / 1M")
+
+    t.destroy()
+  })
+
+  test("Sessions tab preconfigures stored model on first resume", async () => {
+    seed()
+    let prepped = false
+    const row = { id: "past", title: "Past", preview: "hello", message_count: 2, started_at: 1000, source: "tui" }
+    const gw = new MockGateway({
+      "commands.catalog": () => ({ pairs: [["/sessions", "sessions"]] }),
+      "session.create": () => ({ session_id: "old" }),
+      "session.list": () => ({ sessions: [row] }),
+      "config.set": p => {
+        prepped = p.value === "gpt-5.5 --provider openai-codex" && p.session_id === undefined
+        return { key: p.key, value: p.value, warning: "" }
+      },
+      "session.resume": p => ({
+        session_id: "live-past",
+        resumed: p.session_id,
+        messages: [{ role: "user", text: "hello" }],
+        info: {
+          model: "gpt-5.5",
+          session_id: "live-past",
+          tools: {},
+          skills: {},
+          usage: {
+            input: 0,
+            output: 0,
+            total: 0,
+            context_used: 110_000,
+            context_max: prepped ? 1_000_000 : 256_000,
+          },
+        },
+      }),
+    })
+    const t = await mount({ gw, launch: { mode: "new", splash: false } })
+    await until(t, () => t.frame().includes("Ready"))
+
+    await act(async () => { await t.keys.typeText("/sessions") })
+    act(() => t.keys.pressEnter())
+    await until(t, () => t.frame().includes("Sessions (1)"))
+    act(() => t.keys.pressEnter())
+    await until(t, () => t.frame().includes("Load session?"))
+    await act(async () => { await t.keys.typeText("y") })
+    await until(t, () => t.frame().includes("Ready") && t.frame().includes("hello"))
+
+    const ci = gw.calls.findIndex(c => c.method === "config.set" && c.params.value === "gpt-5.5 --provider openai-codex")
+    const ri = gw.calls.findIndex(c => c.method === "session.resume" && c.params.session_id === "past")
+    expect(ci).toBeGreaterThan(-1)
+    expect(ci).toBeLessThan(ri)
+    expect(t.frame()).toContain("110K / 1M")
+    expect(t.frame()).not.toContain("Connecting")
+
+    t.destroy()
+  })
+
+  test("switchSession stops before resume when model preconfigure fails", async () => {
+    seed()
+    const gw = new MockGateway({
+      "commands.catalog": () => ({ pairs: [["/resume", "resume session"]] }),
+      "session.create": () => ({ session_id: "old" }),
+      "config.set": () => { throw new Error("model switch failed") },
+      "session.resume": p => ({ session_id: p.session_id, messages: [] }),
+    })
+    const t = await mount({ gw, launch: { mode: "new", splash: false } })
+    await until(t, () => t.frame().includes("Ready"))
+
+    await act(async () => { await t.keys.typeText("/resume past") })
+    act(() => t.keys.pressEnter())
+    await until(t, () => t.frame().includes("Failed to resume: model switch failed"))
+
+    expect(gw.calls.some(c => c.method === "session.resume" && c.params.session_id === "past")).toBe(false)
+    expect(t.frame()).not.toContain("Connecting")
+
+    await act(async () => { await t.keys.typeText("still old") })
+    act(() => t.keys.pressEnter())
+    await until(t, () => t.gw.last("prompt.submit") !== undefined)
+    expect(t.gw.last("prompt.submit")?.params.session_id).toBe("old")
+
+    t.destroy()
+  })
+
   test("switchSession keeps prev live when resume fails", async () => {
     const gw = new MockGateway({
       "commands.catalog": () => ({ pairs: [["/resume", "resume session"]] }),
       "session.resume": p => {
         if (p.session_id === "bad") throw new Error("nope")
-        return { session_id: p.session_id, messages: [] }
+        return { session_id: p.session_id, messages: [{ role: "user", text: "old transcript" }] }
       },
     })
     const t = await mount({ gw, launch: { mode: "resume", sid: "first", splash: false } })
-    await until(t, () => t.frame().includes("Ready"))
+    await until(t, () => t.frame().includes("Ready") && t.frame().includes("old transcript"))
 
     await act(async () => { await t.keys.typeText("/resume bad") })
     act(() => t.keys.pressEnter())
     await until(t, () => t.frame().includes("Failed to resume"))
 
-    // No close — user is still on "first", which must stay live.
+    // No close — user is still on "first", which must stay live and usable.
     expect(t.gw.last("session.close")).toBeUndefined()
+    expect(t.frame()).not.toContain("Connecting")
+    expect(t.frame()).toContain("old transcript")
+
+    await act(async () => { await t.keys.typeText("still here") })
+    act(() => t.keys.pressEnter())
+    await until(t, () => t.gw.last("prompt.submit") !== undefined)
+    expect(t.gw.last("prompt.submit")?.params.session_id).toBe("first")
 
     t.destroy()
   })
@@ -143,7 +295,10 @@ describe("session.close", () => {
 
     await act(async () => { await t.keys.typeText("/sessions") })
     act(() => t.keys.pressEnter())
-    await until(t, () => t.frame().includes("Live Sessions"))
+    await until(t, () => {
+      const f = t.frame()
+      return f.includes("Sessions (") && f.includes("Live A") && !f.includes("Live Sessions")
+    })
     act(() => t.keys.pressEnter())
     await until(t, () => t.frame().includes("partial answer"))
 

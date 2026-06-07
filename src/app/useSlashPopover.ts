@@ -27,12 +27,14 @@ export function useSlashPopover(input: string, cmds: ReadonlyArray<SlashCommand>
     return m ? rank(cmds, m[1]) : null
   }, [input, cmds])
 
+  const active = popover ? Math.max(0, Math.min(cursor, popover.length - 1)) : 0
+
   // Reset cursor when input changes
   useEffect(() => { setCursor(c => c === 0 ? c : 0) }, [input])
 
   const ghost = useMemo(() => {
     if (!popover || popover.length === 0) return ""
-    const best = popover[Math.min(cursor, popover.length - 1)]
+    const best = popover[active]
     if (!best || best.name.includes(" ")) return ""
     const m = input.match(/^\/(\S*)$/)
     if (!m) return ""
@@ -40,9 +42,9 @@ export function useSlashPopover(input: string, cmds: ReadonlyArray<SlashCommand>
     if (typed.length < 2) return ""
     if (!best.name.toLowerCase().startsWith(typed.toLowerCase())) return ""
     return best.name.slice(typed.length)
-  }, [input, popover, cursor])
+  }, [input, popover, active])
 
   const open = popover !== null && popover.length > 0
 
-  return { popover, cursor, setCursor, ghost, open }
+  return { popover, cursor: active, setCursor, ghost, open }
 }

@@ -1,9 +1,8 @@
 import { memo } from "react"
 import { useTheme } from "../theme"
 
-// Tab-footer hint line (docs/nav_and_ui_standards.md § Hint Line).
-// One row, rendered below all panes and above the composer. Muted
-// text, clips instead of wraps.
+// Tab-footer hint line. One muted row below panes and above the
+// composer; clips instead of wraps.
 //
 // Input shapes:
 //   - `pairs`: structured [key, verb] list, rendered as `[key] verb`

@@ -2,6 +2,13 @@ import { describe, test, expect } from "bun:test"
 import { act } from "react"
 import { mountNode, until, MockGateway } from "./harness"
 import { Sidebar } from "../src/components/sidebar/Sidebar"
+import { parseEikon } from "../src/components/avatar/eikon"
+
+const PREVIEW = parseEikon([
+  JSON.stringify({ eikon: 1, name: "preview", width: 48, height: 24 }),
+  JSON.stringify({ state: "idle", fps: 1, frame_count: 1, loop_from: 1 }),
+  JSON.stringify({ f: 0, data: "SIDEBAR-PREVIEW-IDLE" }),
+].join("\n") + "\n")
 
 const INFO = {
   model: "test-model-v9",
@@ -115,6 +122,21 @@ describe("Sidebar", () => {
     // No gauge chrome: no bracketed block bar
     expect(f).not.toMatch(/\[█+░*\]/)
     expect(f).not.toMatch(/\[░+\]/)
+    t.destroy()
+  })
+
+  test("preview override replaces avatar and suppresses chat cloud", async () => {
+    const gw = new MockGateway({ "plugins.list": () => ({ plugins: [] }) })
+    const t = await mountNode(
+      <Sidebar agentState="thinking" info={INFO} cloud pulse preview={{ key: "market", eikon: PREVIEW, state: "idle", subtitle: "Test" }} />,
+      { gw, width: 160, height: 48 },
+    )
+    await until(t, () => t.frame().includes("SIDEBAR-PREVIEW-IDLE"))
+    const f = t.frame()
+    expect(f).toMatch(/Eikon\s+preview/)
+    expect(f).toMatch(/Author\s+Test/)
+    expect(f).not.toContain("Profile")
+    expect(f).not.toContain("╭")
     t.destroy()
   })
 })

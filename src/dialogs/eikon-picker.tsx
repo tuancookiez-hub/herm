@@ -71,7 +71,7 @@ export const EikonPickerDialog = (props: {
                     </box>
                     <box height={1}>
                       <text fg={theme.textMuted}>
-                        {`${e.meta.author ?? "—"} · ${e.meta.states.length} states · ${e.meta.width}×${e.meta.height}`}
+                        {`${e.meta.author ?? "—"} · ${e.meta.states.length} states`}
                       </text>
                     </box>
                   </box>

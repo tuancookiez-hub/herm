@@ -15,6 +15,7 @@ const Host = ({ grab, composerRef }: { grab: (api: ReturnType<typeof useBackgrou
     <Composer
       ref={composerRef}
       focused
+      canSubmitPrompt={true}
       ready
       streaming={false}
       cmds={[]}

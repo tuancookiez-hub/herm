@@ -55,9 +55,17 @@ interface TuiPreferences {
    *  cursor position or transient toggles. */
   kanban?: KanbanPrefs
   sessions?: SessionsPrefs
+  /** Client-side confirm_ask approvals suppressed by exact question+subject. */
+  neverPrompts?: NeverPrompt[]
   /** Opaque plugin storage. Per-plugin keys are namespaced at the api
    *  layer (`${id}.${key}`); `enabled` holds the id→bool override map. */
   plugin?: Record<string, unknown>
+}
+
+export type NeverPrompt = {
+  group: string
+  question: string
+  subject: string
 }
 
 /** Persisted Sessions-tab state. */

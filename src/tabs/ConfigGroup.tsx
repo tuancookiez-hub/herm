@@ -6,7 +6,6 @@ import { Env } from "./Env"
 import { Memory } from "./Memory"
 import { SubTabBar } from "../components/tabs/SubTabBar"
 import { SUB_TABS, CONFIG_TAB } from "../app/tabs"
-import { useKeys } from "../keys"
 
 type Props = {
   focused?: boolean
@@ -18,12 +17,11 @@ type Props = {
 // Config first so a bare click on the top-level tab lands on the most
 // common target; the rest are alphabetical-ish by frequency of use.
 export const ConfigGroup = memo((props: Props) => {
-  const keys = useKeys()
   const labels = SUB_TABS[CONFIG_TAB]
   useEffect(() => {
     if (props.sub >= labels.length) props.setSub(0)
   }, [props.sub, labels.length])
-  const hint = `${keys.print("tab.prev")}/${keys.print("tab.next")} group  ·  shift+←/→ sub`
+  const hint = "shift+←/→ sub"
   return (
     <box flexDirection="column" flexGrow={1} minWidth={0}>
       <SubTabBar tabs={labels} active={props.sub} onChange={props.setSub} hint={hint} />

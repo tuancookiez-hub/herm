@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
-import type { BorderSides, ScrollBoxRenderable } from "@opentui/core"
+import type { BorderSides, MouseEvent, ScrollBoxRenderable } from "@opentui/core"
 import {
   boardStateOf, detailOf, tailLogOf, assignees, q, STATUSES,
   currentBoard, listBoards, resetKanban, patchTask,
@@ -93,6 +93,30 @@ const triOf = (c: Chip, m: Mask): Tri =>
   c.kind === "who" ? m.who.get(c.v) ?? "off"
   : c.kind === "pri" ? m.pri.get(c.v) ?? "off"
   : m.status.get(c.v) ?? "off"
+
+const recOf = (v: unknown): Record<string, unknown> | null =>
+  v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null
+
+const assignedByDefault = (d: Detail): boolean =>
+  d.events.some(e => e.kind === "assigned"
+    && recOf(e.payload)?.source === "kanban.default_assignee")
+
+type DispatchJson = {
+  spawned?: Array<{ task_id?: string; assignee?: string; workspace?: string }>
+  skipped_unassigned?: string[]
+  skipped_nonspawnable?: string[]
+  skipped_per_profile_capped?: Array<{ task_id?: string; assignee?: string; current?: number }>
+  auto_assigned_default?: string[]
+}
+
+const dispatchJson = (out: string): DispatchJson | null => {
+  try {
+    const raw = JSON.parse(out) as unknown
+    return recOf(raw) as DispatchJson | null
+  } catch { return null }
+}
+
+const countOf = <T,>(xs: T[] | undefined): number => Array.isArray(xs) ? xs.length : 0
 
 /** True when `v` survives the group. Absence ⇒ "off". */
 function admits<V>(g: Map<V, Tri>, v: V): boolean {
@@ -228,7 +252,8 @@ const Column = memo((p: {
           <span fg={theme.textMuted}>{`  ${p.tasks.length}`}</span>
         </text>
       </box>
-      <scrollbox ref={box} scrollY flexGrow={1} verticalScrollbarOptions={NOBAR}>
+      <scrollbox id={`kb-col-${p.slug}-${p.status}`} ref={box} scrollY flexGrow={1} verticalScrollbarOptions={NOBAR}
+                 onMouseScroll={(e: MouseEvent) => e.stopPropagation()}>
         <box flexDirection="column" width="100%">
           {p.tasks.map((t, i) => (
             <Card key={t.id} id={id(i)} t={t} on={p.on && i === p.sel}
@@ -409,7 +434,9 @@ const SidePane = memo((p: { pane: Pane; on: boolean; sel: number; diags: Diag[] 
                 : <markdown content={d.body} fg={theme.markdownText} syntaxStyle={syntaxStyle} />
               : <text fg={theme.textMuted}>—</text>,
             p.on && cur === "body" ? "Enter edit (raw)" : undefined)}
-          {srow("assignee", "Assignee", d.assignee ?? "—",
+          {srow("assignee", "Assignee", d.assignee
+              ? assignedByDefault(d) ? `${d.assignee} (default)` : d.assignee
+              : "—",
             p.on && cur === "assignee" ? "Enter pick" : undefined)}
           {srow("priority", "Priority", d.priority ? `P${d.priority}` : "—",
             p.on && cur === "priority" ? "↑↓ / Enter" : undefined)}
@@ -965,7 +992,22 @@ export const Kanban = memo((props: { focused?: boolean }) => {
       title: `Dispatch · ${live.current.at}`,
       body: `${ready} task${ready === 1 ? "" : "s"} in 'ready'. Spawns one worker per task (one pass).`,
       yes: "dispatch",
-    }).then(ok => { if (ok) void sh("dispatch --json", `Dispatched (${ready} ready)`) })
+    }).then(ok => {
+      if (!ok) return
+      void sh("dispatch --json").then(out => {
+        if (out == null) return
+        const r = dispatchJson(out)
+        const spawned = countOf(r?.spawned)
+        const capped = countOf(r?.skipped_per_profile_capped)
+        const defaults = countOf(r?.auto_assigned_default)
+        const skipped = countOf(r?.skipped_unassigned) + countOf(r?.skipped_nonspawnable)
+        const parts = [`${spawned} spawned`]
+        if (defaults) parts.push(`${defaults} default-assigned`)
+        if (capped) parts.push(`${capped} profile-capped`)
+        if (skipped) parts.push(`${skipped} skipped`)
+        toast.show({ variant: capped || skipped ? "info" : "success", message: `Dispatch: ${parts.join(" · ")}` })
+      })
+    })
   }, [dialog, sh, toast])
 
   const showLog = useCallback((t: Task) => {
@@ -1267,7 +1309,7 @@ export const Kanban = memo((props: { focused?: boolean }) => {
       <TabShell
         title={`Kanban · ${sections.length} board${sections.length === 1 ? "" : "s"} · ${grand} task${grand === 1 ? "" : "s"}${running ? ` · ${running} running` : ""}`}
       >
-        <scrollbox ref={outer} scrollY flexGrow={1} verticalScrollbarOptions={NOBAR}>
+        <scrollbox id="kb-board-scroll" ref={outer} scrollY flexGrow={1} verticalScrollbarOptions={NOBAR}>
           <box flexDirection="column" width="100%">
             {sections.map(s => {
               const on = s.board.slug === at

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test"
 import { act } from "react"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { mount as mountApp, until, MockGateway } from "./harness"
 import * as prefs from "../src/context/preferences"
 import * as exit from "../src/app/exit"
@@ -47,6 +49,21 @@ describe("app", () => {
     // file is running under Bun's concurrent test scheduler. Assert the tab
     // transition itself, not a globally-empty Sessions fixture.
     await until(t, () => t.frame().includes("Sessions ("))
+
+    t.destroy()
+  })
+
+  test("sub-tab hint omits duplicate group navigation", async () => {
+    const t = await mount()
+    await until(t, () => t.frame().includes("Ready"))
+
+    act(() => t.keys.pressArrow("right", { meta: true }))
+    await until(t, () => t.frame().includes("Sessions ("))
+
+    const f = t.frame()
+    expect(f).toContain("Alt+←/Alt+→ or Ctrl+X N")
+    expect(f).toContain("shift+←/→ sub")
+    expect(f).not.toContain("Alt+←/Alt+→ group")
 
     t.destroy()
   })
@@ -272,6 +289,85 @@ describe("app", () => {
     expect(t.gw.last("prompt.submit")?.params.text).toBe("hey")
 
     t.destroy()
+  })
+
+
+  test("marketplace preview updates sidebar without changing active preference", async () => {
+    const HH = process.env.HERMES_HOME!
+    const png = new Uint8Array([137, 80, 78, 71])
+    let previewHits = 0
+    const launch = (name: string, author: string, line: string) => [
+      JSON.stringify({
+        type: "header", eikon: 1, id: `liftaris/${name}`, version: "1.0", title: name,
+        author: { name: author }, size: { cols: 48, rows: 24 }, defaultSignal: "state.idle",
+        signals: { "state.idle": { clip: "idle" } },
+      }),
+      JSON.stringify({ type: "clip", name: "idle", fps: 1, frameCount: 1, loopFrom: 0 }),
+      JSON.stringify({
+        type: "frame", clip: "idle", index: 0,
+        rows: Array.from({ length: 24 }, (_, i) => (i === 0 ? line : "").padEnd(48)),
+      }),
+    ].join("\n") + "\n"
+    const marketPreview = launch("marketone", "Kaio", "MARKET-PREVIEW-LINE")
+    const activePreview = launch("activeone", "Local", "ACTIVE-EIKON-LINE")
+    const srv = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname
+        if (path === "/eikons/index.json") return Response.json([
+          { name: "marketone", author: "Kaio", width: 48, height: 24, poster: "M1", source: "marketone/", description: "market one" },
+        ])
+        if (path === "/eikons/marketone/marketone.eikon") {
+          previewHits++
+          return new Response(marketPreview)
+        }
+        if (path === "/eikons/marketone/manifest.json") return Response.json({ name: "marketone", source: "source.png" })
+        if (path === "/eikons/marketone/source.png") return new Response(png)
+        return new Response("404", { status: 404 })
+      },
+    })
+    const prev = process.env.EIKON_URL
+    process.env.EIKON_URL = `http://localhost:${srv.port}/eikons`
+    rmSync(join(HH, "eikons"), { recursive: true, force: true })
+    mkdirSync(join(HH, "eikons", "activeone", "source"), { recursive: true })
+    writeFileSync(join(HH, "eikons", "activeone", "activeone.eikon"), activePreview)
+    prefs.set("eikon", "activeone")
+
+    const prevTestPerf = process.env.HERM_TEST_PERF
+    process.env.HERM_TEST_PERF = "1"
+    globalThis.__hermAvatarTimerStarts = 0
+    const t = await mount({ width: 180, height: 48 })
+    await until(t, () => t.frame().includes("Ready") && t.frame().includes("ACTIVE-EIKON-LINE"))
+    const startsBefore = globalThis.__hermAvatarTimerStarts ?? 0
+    act(() => { for (let i = 0; i < 4; i++) t.keys.pressArrow("right", { meta: true }) })
+    await until(t, () => t.frame().includes("Gallery ("))
+    act(() => t.keys.pressArrow("right", { shift: true }))
+    act(() => t.keys.pressArrow("right", { shift: true }))
+    await until(t, () => t.frame().includes("Marketplace (1)") && t.frame().includes("MARKET-PREVIEW-LINE"))
+    expect(t.frame()).toMatch(/Eikon\s+marketone/)
+    expect(t.frame()).toMatch(/Author\s+Kaio/)
+    expect(t.frame()).toContain("market one")
+    expect(t.frame()).toMatch(/Action\s+Install/)
+    expect(t.frame()).toMatch(/Digest\s+unknown/)
+    expect(t.frame()).not.toMatch(/Profile\s+default/)
+
+    expect(prefs.get("eikon")).toBe("activeone")
+    expect(t.frame()).not.toContain("ACTIVE-EIKON-LINE")
+    expect(previewHits).toBe(1)
+    expect((globalThis.__hermAvatarTimerStarts ?? 0) - startsBefore).toBeLessThanOrEqual(1)
+
+    act(() => t.keys.pressEscape())
+    await until(t, () => t.frame().includes("Marketplace (") && t.frame().includes("ACTIVE-EIKON-LINE"))
+    expect(prefs.get("eikon")).toBe("activeone")
+
+    delete globalThis.__hermAvatarTimerStarts
+    if (prevTestPerf === undefined) delete process.env.HERM_TEST_PERF
+    else process.env.HERM_TEST_PERF = prevTestPerf
+    t.destroy()
+    srv.stop()
+    process.env.EIKON_URL = prev
+    prefs.set("eikon", undefined)
+    rmSync(join(HH, "eikons"), { recursive: true, force: true })
   })
 
   test("sidebar hides below 120 cols", async () => {
@@ -984,6 +1080,33 @@ describe("app", () => {
     expect(f).toContain("HTTP 404")          // lifecycle status persisted as system line
     expect(f).toContain("Error:")            // message.complete status=error → error action
     expect(f).toContain("request failed")
+
+    t.destroy()
+  })
+
+  test("preflight compression stderr does not end the active turn", async () => {
+    const t = await mount()
+    await until(t, () => t.frame().includes("Ready"))
+
+    act(() => {
+      t.gw.push({ type: "message.start" })
+      t.gw.push({ type: "status.update", payload: { kind: "lifecycle", text: "📦 Preflight compression: ~230,802 tokens >= 217,600 threshold. This may take a moment." } })
+      t.gw.push({ type: "gateway.stderr", payload: { line: "⚠ Compression summary failed: timeout. Inserted a fallback context marker." } })
+      t.gw.push({ type: "status.update", payload: { kind: "warn", text: "⚠ Compression summary failed: timeout. Inserted a fallback context marker." } })
+      t.gw.push({ type: "reasoning.delta", payload: { text: "I need to inspect files." } })
+      t.gw.push({ type: "tool.start", payload: { tool_id: "t1", name: "read_file", context: "src/app.tsx" } })
+    })
+    await until(t, () => {
+      const f = t.frame()
+      return f.includes("Type to queue") && f.includes("I need to inspect files") && f.includes("tools 1")
+    })
+
+    act(() => t.gw.push({ type: "message.complete", payload: { text: "done", usage: { input: 1, output: 1, total: 2 } } }))
+    await t.settle()
+    const n = (t.frame().match(/Connected —/g) ?? []).length
+    act(() => t.gw.push({ type: "session.info", payload: { model: "test-model", session_id: "test-sid", tools: {}, skills: {} } }))
+    await t.settle()
+    expect(t.frame().match(/Connected —/g) ?? []).toHaveLength(n)
 
     t.destroy()
   })

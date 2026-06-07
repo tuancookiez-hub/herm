@@ -110,10 +110,10 @@ export const buildFields = (user: Record<string, unknown>): Field[] => {
 // not derivable from source — keeps the sidebar to ~18 entries instead
 // of 34 with a dozen 1-field groups.
 const MERGE: Record<string, string> = {
-  approvals: "security", privacy: "security",
+  approvals: "security", privacy: "security", secrets: "security",
   checkpoints: "agent", context: "agent", cron: "agent", network: "agent",
   model_catalog: "general", onboarding: "general",
-  human_delay: "display", dashboard: "display",
+  human_delay: "display", dashboard: "display", gateway: "display",
   tool_output: "agent", prompt_caching: "compression", code_execution: "terminal",
   lsp: "agent", x_search: "agent",
   slack: "platforms", telegram: "platforms", mattermost: "platforms",

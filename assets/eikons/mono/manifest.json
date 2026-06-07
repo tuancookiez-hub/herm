@@ -1,0 +1,28 @@
+{
+  "kind": "eikon.package",
+  "schemaVersion": "1.0",
+  "id": "liftaris/mono",
+  "name": "mono",
+  "display": {
+    "title": "mono",
+    "author": "kaio"
+  },
+  "compatibility": {
+    "eikon": ">=1 <2"
+  },
+  "entrypoints": {
+    "default": "mono.eikon"
+  },
+  "files": [
+    {
+      "path": "mono.eikon",
+      "mediaType": "application/vnd.eikon.stream+jsonl",
+      "role": "runtime"
+    }
+  ],
+  "extensions": {
+    "used": [
+      "eikon.signals.v1"
+    ]
+  }
+}

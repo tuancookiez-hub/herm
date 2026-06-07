@@ -1,7 +1,3 @@
-// Eikon gallery — browse bundled + installed avatars, Enter = activate.
-// Same content model as the Ctrl+K "Pick Avatar" palette entry, but as
-// a full tab body with a larger preview and delete/new affordances.
-
 import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { readFileSync } from "node:fs"
 import { basename, dirname } from "node:path"
@@ -13,7 +9,9 @@ import { HintBar } from "../ui/hint"
 import { VBAR } from "../ui/table"
 import { useKeys, handleListKey, useFollow } from "../keys"
 import { openConfirm } from "../dialogs/confirm"
+import { openEikonSubmit } from "../dialogs/eikon-submit"
 import { openNewEikon } from "../dialogs/new-eikon"
+import * as submitSvc from "../service/eikon-submit"
 import { useKeyboard } from "@opentui/react"
 import { AnimatedAvatar } from "../components/avatar/AnimatedAvatar"
 import { listEikons, parseEikon, type ParsedEikon } from "../components/avatar/eikon"
@@ -27,12 +25,17 @@ type Row = {
   w: number; h: number; url?: string; hasSource: boolean
 }
 
-export const EikonGallery = memo((props: { focused: boolean; onEdit?: (name: string) => void }) => {
+type Props = {
+  focused: boolean
+  onEdit?: (name: string) => void
+  submit?: submitSvc.Submit
+}
+
+export const EikonGallery = memo((props: Props) => {
   const theme = useTheme().theme
   const dialog = useDialog()
   const toast = useToast()
   const keys = useKeys()
-  const follow = useFollow("gal")
   const rev = useSyncExternalStore(eikon.onRevision, eikon.revision)
 
   const rows = useMemo<Row[]>(() => {
@@ -46,26 +49,28 @@ export const EikonGallery = memo((props: { focused: boolean; onEdit?: (name: str
         path: e.path, name: e.meta.name, slug, author: e.meta.author,
         bundled: e.path.startsWith(BUNDLED_EIKON_DIR),
         w: e.meta.width, h: e.meta.height,
-        url: (mine?.sourceUrl ?? e.meta.source_url) as string | undefined,
+        url: mine?.sourceUrl,
         hasSource: mine?.hasSource ?? !!eikon.findSource(slug),
       }
     })
   }, [rev])
 
+  const active = prefs.usePref("eikon")
   const [sel, setSel] = useState(0)
+  const galleryFollow = useFollow("gal", i => rows[i]?.slug ?? i)
+
   useEffect(() => { if (sel >= rows.length) setSel(Math.max(0, rows.length - 1)) }, [rows.length, sel])
 
   const cur = rows[sel]
-  const active = prefs.usePref("eikon")
   const parsed = useMemo<ParsedEikon | undefined>(() => {
     if (!cur) return undefined
     try { return parseEikon(readFileSync(cur.path, "utf8")) } catch { return undefined }
   }, [cur])
 
-  const activate = () => {
-    if (!cur) return
-    prefs.set("eikon", cur.slug)
-    toast.show({ variant: "success", message: `Avatar → ${cur.name}` })
+  const activate = (row = cur) => {
+    if (!row) return
+    prefs.set("eikon", row.slug)
+    toast.show({ variant: "success", message: `Avatar → ${row.name}` })
   }
 
   const doNew = useCallback(async () => {
@@ -82,13 +87,27 @@ export const EikonGallery = memo((props: { focused: boolean; onEdit?: (name: str
       return props.onEdit?.(res.name)
     }
     toast.show({ variant: "info", message: `Installing '${res.name}' from ${res.src}…` })
-    await eikon.fetchSource(res.src, { name: res.name })
+    await eikon.installPackage(res.src, { name: res.name })
       .then(out => {
         toast.show({ variant: "success", message: `Installed '${out.name}' (${out.n} files)` })
-        prefs.set("eikon", out.name)
       })
       .catch(e => toast.error(e instanceof Error ? e : new Error(String(e))))
   }, [dialog, toast, props])
+
+  const submitLocal = useCallback(async () => {
+    if (!cur || cur.bundled) return
+    const path = submitSvc.submitPath(cur.slug)
+    const pub = submitSvc.publishedInfo(path)
+    if (pub) {
+      toast.show({ variant: "warning", title: "Published eikon", message: "Create a local draft before submitting", duration: 6000 })
+      return
+    }
+    await openEikonSubmit(dialog, {
+      name: cur.name,
+      path,
+      submit: props.submit ?? submitSvc.submit,
+    })
+  }, [cur, dialog, props.submit, toast])
 
   const del = async () => {
     if (!cur || cur.bundled) return
@@ -104,28 +123,32 @@ export const EikonGallery = memo((props: { focused: boolean; onEdit?: (name: str
   useKeyboard(key => {
     if (!props.focused || dialog.open()) return
     if (handleListKey(keys, key, {
-      count: rows.length, setSel, ...follow.opts,
-      onActivate: activate,
+      count: rows.length,
+      setSel,
+      page: galleryFollow.opts.page,
+      scrollTo: n => galleryFollow.ref.current?.scrollChildIntoView(galleryFollow.id(n)),
+      onActivate: () => activate(),
       onDelete: () => void del(),
       onNew: doNew,
     })) return
+    if (key.name === "u" && cur && !cur.bundled) return void submitLocal()
     if (key.name === "e" && cur && props.onEdit) props.onEdit(cur.slug)
   })
 
   return (
     <box flexDirection="column" flexGrow={1} minWidth={0}>
       <box flexDirection="row" flexGrow={1}>
-        <TabShell title={`Gallery (${rows.length})`} focus={props.focused} grow={2}>
-          <scrollbox ref={follow.ref} scrollY flexGrow={1} verticalScrollbarOptions={VBAR}>
+        <TabShell title={`Gallery (${rows.length})`} focus={props.focused} grow={3}>
+          <scrollbox ref={galleryFollow.ref} scrollY flexGrow={1} verticalScrollbarOptions={VBAR}>
             {rows.length === 0
               ? <text fg={theme.textMuted}>No eikons found.</text>
               : rows.map((r, i) => {
                   const on = i === sel
                   const here = r.slug === active
                   return (
-                    <box key={r.path} id={follow.id(i)} flexDirection="row" height={2}
+                    <box key={r.path} id={galleryFollow.id(i)} flexDirection="row" height={2}
                          backgroundColor={on ? theme.backgroundElement : undefined}
-                         onMouseMove={() => setSel(i)} onMouseDown={activate}>
+                         onMouseMove={() => setSel(i)} onMouseDown={() => { setSel(i); activate(r) }}>
                       <box width={2}><text fg={on ? theme.primary : theme.textMuted}>{on ? "▸ " : "  "}</text></box>
                       <box flexDirection="column" flexGrow={1} minWidth={0}>
                         <box height={1}><text fg={here ? theme.accent : theme.text}>
@@ -133,7 +156,7 @@ export const EikonGallery = memo((props: { focused: boolean; onEdit?: (name: str
                           <span fg={theme.textMuted}>{r.bundled ? "  (bundled)" : ""}</span>
                         </text></box>
                         <box height={1}><text fg={theme.textMuted}>
-                          {`  ${r.author ?? "—"} · ${r.w}×${r.h} · `}
+                          {`  ${r.author ?? "—"} · `}
                           <span fg={r.hasSource ? theme.success : r.url ? theme.textMuted : theme.border}>
                             {r.hasSource ? "● source" : r.url ? "○ source available" : "— no source"}
                           </span>
@@ -154,7 +177,8 @@ export const EikonGallery = memo((props: { focused: boolean; onEdit?: (name: str
       </box>
       <HintBar pairs={[
         ["↑↓", "select"], [keys.print("list.activate"), "use"],
-        ["e", "edit in studio"], [keys.print("list.new"), "new / install"],
+        ...(cur && props.onEdit ? [["e", "edit in studio"] as const] : []),
+        ...(cur && !cur.bundled ? [["u", "submit"] as const] : []), [keys.print("list.new"), "new / install"],
         ...(cur && !cur.bundled ? [[keys.print("list.delete"), "delete"] as const] : []),
       ]} />
     </box>

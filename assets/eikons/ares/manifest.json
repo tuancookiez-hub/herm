@@ -1,0 +1,28 @@
+{
+  "kind": "eikon.package",
+  "schemaVersion": "1.0",
+  "id": "liftaris/ares",
+  "name": "ares",
+  "display": {
+    "title": "ares",
+    "author": "kaio"
+  },
+  "compatibility": {
+    "eikon": ">=1 <2"
+  },
+  "entrypoints": {
+    "default": "ares.eikon"
+  },
+  "files": [
+    {
+      "path": "ares.eikon",
+      "mediaType": "application/vnd.eikon.stream+jsonl",
+      "role": "runtime"
+    }
+  ],
+  "extensions": {
+    "used": [
+      "eikon.signals.v1"
+    ]
+  }
+}

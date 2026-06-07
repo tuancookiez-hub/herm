@@ -167,10 +167,15 @@ describe("useSession.boot", () => {
       "session.resume": p => ({ session_id: "live-past", resumed: p.session_id, messages: [] }),
       "config.set": p => { sets.push(p); return { value: p.value } },
     })
+    gw.setSession("old")
     await boot(gw, { mode: "resume", sid: "past" })
 
     expect(gw.last("session.resume")?.params.session_id).toBe("past")
-    expect(sets).toEqual([{ session_id: "live-past", key: "model", value: "gpt-5.5 --provider openai-codex" }])
+    expect(sets).toEqual([{ session_id: undefined, key: "model", value: "gpt-5.5 --provider openai-codex" }])
+    const ci = gw.calls.findIndex(c => c.method === "config.set")
+    const ri = gw.calls.findIndex(c => c.method === "session.resume")
+    expect(ci).toBeGreaterThan(-1)
+    expect(ci).toBeLessThan(ri)
   })
 
   test("mode:resume normalizes session_*.json filenames", async () => {

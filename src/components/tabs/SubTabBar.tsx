@@ -2,7 +2,7 @@ import { memo } from "react"
 import { TabStrip } from "./TabStrip"
 
 // Sub-tab row inside a group tab. Same visual treatment as the top
-// bar (docs/nav.md § Tab Bars); keyboard is Shift+←/→ via useAppKeys.
+// bar; keyboard is Shift+←/→ via useAppKeys.
 
 type Props = {
   tabs: readonly string[]

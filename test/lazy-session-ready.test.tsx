@@ -68,4 +68,42 @@ describe("lazy session startup", () => {
     })
     t.destroy()
   })
+
+  test("queued prompt drains after lazy session.create before session.info", async () => {
+    const gw = new MockGateway({
+      "session.create": () => ({
+        session_id: "lazy-sid",
+        info: { model: "lazy-model", session_id: "lazy-sid", tools: {}, skills: {}, lazy: true },
+      }),
+      "prompt.submit": () => ({ status: "streaming" }),
+    })
+    gw.start = () => {
+      gw.ok = true
+      gw.push({ type: "gateway.ready" })
+    }
+
+    const t = await mount({ gw })
+    await until(t, () => t.frame().includes("Connecting") && t.frame().includes("lazy-model"))
+
+    act(() => {
+      t.gw.push({ type: "message.start" })
+    })
+    await until(t, () => t.frame().includes("Type to queue"))
+
+    await act(async () => { await t.keys.typeText("queued while lazy") })
+    act(() => t.keys.pressEnter())
+    await until(t, () => t.frame().includes("queued while lazy"))
+    expect(t.gw.calls.filter(c => c.method === "prompt.submit").length).toBe(0)
+
+    act(() => {
+      t.gw.push({ type: "message.complete", payload: { text: "done" } })
+    })
+    await until(t, () => Boolean(t.gw.last("prompt.submit")))
+
+    expect(t.gw.last("prompt.submit")?.params).toMatchObject({
+      session_id: "lazy-sid",
+      text: "queued while lazy",
+    })
+    t.destroy()
+  })
 })

@@ -17,8 +17,8 @@ You do **not** write `.eikon` or `studio.json`. Studio does.
 
 ## Where the user does the work
 
-Herm's built-in **Eikon** tab (Studio / Gallery). Tell the user: "open
-the Eikon tab" or "Ctrl+K → Eikon". In Studio:
+Herm's built-in **Eikon** tab (Gallery / Studio / Marketplace). Tell the user:
+"open the Eikon tab" or "Ctrl+K → Eikon". In Studio:
 
 - `eikon` row → pick / New…
 - `source` row → Local file… / Generate image… / Generate video…
@@ -40,6 +40,7 @@ everything.
 | "make me an eikon of X" | Load `eikon-create` and follow it. |
 | drops an image path | `cp` it to `~/.hermes/eikons/<name>/source/base.<ext>` → "Eikon tab, pick <name>". |
 | "edit my <name> eikon" | "Eikon tab → `eikon` row → <name>." |
+| "install/shared marketplace eikon" | "Eikon tab → Marketplace", or `/marketplace`. |
 | "too dark / washed out" | "invert toggle, then contrast slider — under `input`." |
 | "off-center / too small" | "Ctrl+wheel to zoom, wheel/drag to pan on the preview." |
 | "make it move" | `eikon-create` §5 (video), or Studio's `source` → Generate video…. |

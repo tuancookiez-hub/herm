@@ -213,6 +213,14 @@ export const sortDiags = (ds: Diag[]): Diag[] =>
 
 const DEFAULT = "default"
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/
+const DEFAULT_BUSY_TIMEOUT_MS = 120_000
+
+const busyTimeoutMs = (): number => {
+  const raw = (process.env.HERMES_KANBAN_BUSY_TIMEOUT_MS ?? "").trim()
+  if (!raw) return DEFAULT_BUSY_TIMEOUT_MS
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_BUSY_TIMEOUT_MS
+}
 
 /** Shared Hermes root for kanban paths — mirrors upstream
  *  hermes_cli/kanban_db.py::kanban_home(). HERMES_KANBAN_HOME wins
@@ -344,6 +352,7 @@ const rwOf = (s: string): Database | null => {
   if (hdr) { errors.set(s, hdr); return null }
   try {
     const db = new Database(path)
+    db.exec(`PRAGMA busy_timeout=${busyTimeoutMs()}`)
     try { db.exec("PRAGMA journal_mode=WAL") } catch {}
     db.exec([
       "PRAGMA synchronous=FULL",
@@ -669,6 +678,7 @@ export function kanbanWritePragmas(s: string = slug): Record<string, string | nu
     journal_mode: read("PRAGMA journal_mode"),
     synchronous: read("PRAGMA synchronous"),
     wal_autocheckpoint: read("PRAGMA wal_autocheckpoint"),
+    busy_timeout: read("PRAGMA busy_timeout"),
     secure_delete: read("PRAGMA secure_delete"),
     cell_size_check: read("PRAGMA cell_size_check"),
     foreign_keys: read("PRAGMA foreign_keys"),

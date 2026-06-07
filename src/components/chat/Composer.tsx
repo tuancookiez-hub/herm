@@ -13,6 +13,7 @@ import { looksLikePath } from "../../utils/drop"
 import type { SlashCommand } from "../../app/slashCommands"
 import { useSlashPopover } from "../../app/useSlashPopover"
 import { useAtRefPopover, atWordAt } from "../../app/useAtRefPopover"
+import { acceptCompletion, useCompletion } from "../../app/useCompletion"
 import { frecency } from "../../app/frecency"
 import { useInputHistory, type HistEntry } from "../../app/useInputHistory"
 import { useBackground } from "../../app/background"
@@ -49,7 +50,7 @@ export type ComposerHandle = {
 
 type Props = {
   focused: boolean
-  connected?: boolean
+  canSubmitPrompt: boolean
   ready: boolean
   streaming: boolean
   status?: string
@@ -113,7 +114,9 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>((props, ref) => {
   }, [input])
 
   const pop = useSlashPopover(mode === "normal" ? head : "", props.cmds)
+  const atSpot = mode === "normal" ? atWordAt(input, caret) : null
   const at = useAtRefPopover(mode === "normal" ? input : "", caret)
+  const comp = useCompletion(mode === "normal" && !atSpot ? head : "", mode !== "normal" || pop.open, gw)
 
   const write = useCallback((v: string) => {
     // clear() wipes text + extmarks via setText(""); replay v after.
@@ -141,8 +144,8 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>((props, ref) => {
   ], [keys])
 
   // Hold latest pop/props in a ref so the imperative handle is stable.
-  const live = useRef({ pop, at, props, input })
-  live.current = { pop, at, props, input }
+  const live = useRef({ pop, at, comp, props, input })
+  live.current = { pop, at, comp, props, input }
 
   // Notify parent only on the empty↔non-empty edge so the splash
   // continue-prompt can hide the moment typing starts.
@@ -252,6 +255,13 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>((props, ref) => {
     // /cmd prompts all resolve against the catalog.
     const a = live.current.at
     if (a.open) return atAccept()
+    const cc = live.current.comp
+    if (cc.open) {
+      const it = cc.items[cc.cursor]
+      if (!it || !it.text) return
+      write(acceptCompletion(live.current.input, it, cc.replaceFrom))
+      return
+    }
     const p = live.current.pop
     if (p.open) {
       const c = p.popover?.[p.cursor]
@@ -270,7 +280,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>((props, ref) => {
     }
     const text = exp.text.trim()
     if (live.current.props.streaming) {
-      if (!text || !(live.current.props.connected ?? live.current.props.ready)) return
+      if (!text || !live.current.props.canSubmitPrompt) return
       hist.push({ input: text, parts: exp.parts })
       write("")
       // Slash-shaped input routes through onSend so send() → slash()
@@ -283,7 +293,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>((props, ref) => {
     }
     const hasAtt = (live.current.props.attachments?.length ?? 0) > 0
     if (!text && !hasAtt) { live.current.props.onEmptyEnter?.(); return }
-    if (!(live.current.props.connected ?? live.current.props.ready)) return
+    if (!live.current.props.canSubmitPrompt) return
     if (text) hist.push({ input: text, parts: exp.parts })
     write("")
     live.current.props.onSend(text, exp.parts)
@@ -299,16 +309,24 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>((props, ref) => {
     mode: () => modeRef.current,
     setMode,
     caret: () => ta.current?.cursorOffset ?? 0,
-    popOpen: () => live.current.pop.open || live.current.at.open,
+    popOpen: () => live.current.pop.open || live.current.at.open || live.current.comp.open,
     popNav: (d) => {
       const a = live.current.at
       if (a.open) return a.setCursor(c => Math.max(0, Math.min(a.items.length - 1, c + d)))
+      const cc = live.current.comp
+      if (cc.open) return cc.setCursor(c => Math.max(0, Math.min(cc.items.length - 1, c + d)))
       const max = (live.current.pop.popover?.length ?? 1) - 1
       pop.setCursor(c => Math.max(0, Math.min(max, c + d)))
     },
     popAccept: () => {
       const a = live.current.at
       if (a.open) return atAccept()
+      const cc = live.current.comp
+      if (cc.open) {
+        const it = cc.items[cc.cursor]
+        if (it?.text) write(acceptCompletion(live.current.input, it, cc.replaceFrom))
+        return
+      }
       const p = live.current.pop
       const c = p.popover?.[p.cursor]
       if (c) write(`/${c.name}${c.name.includes(" ") ? " " : ""}`)
@@ -316,6 +334,8 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>((props, ref) => {
     popCancel: () => {
       const a = live.current.at
       if (a.open) return a.dismiss()
+      const cc = live.current.comp
+      if (cc.open) return cc.dismiss()
       write("")
     },
     // History nav is cursor-aware: ↑ fires when the caret is on the
@@ -383,6 +403,18 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>((props, ref) => {
             cursor={at.cursor}
             onCursor={at.setCursor}
             onSelect={atAccept}
+          />
+        </box>
+      ) : props.focused && comp.open ? (
+        <box position="absolute" bottom={lift} left={0} right={0}>
+          <AtRefPopover
+            items={comp.items}
+            cursor={comp.cursor}
+            onCursor={comp.setCursor}
+            onSelect={idx => {
+              const it = comp.items[idx]
+              if (it?.text) write(acceptCompletion(input, it, comp.replaceFrom))
+            }}
           />
         </box>
       ) : null}

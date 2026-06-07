@@ -306,17 +306,38 @@ export type ConfigSetResponse = {
   history_reset?: boolean
 }
 
+export type ModelPricing = {
+  input: string
+  output: string
+  cache: string | null
+  free: boolean
+}
+
+export type ModelCapabilities = {
+  fast?: boolean
+  reasoning?: boolean
+}
+
+export type ModelOptionProvider = {
+  slug: string
+  name: string
+  models?: string[]
+  total_models?: number
+  is_current?: boolean
+  warning?: string
+  authenticated?: boolean
+  auth_type?: string
+  key_env?: string
+  pricing?: Record<string, ModelPricing>
+  free_tier?: boolean
+  unavailable_models?: string[]
+  capabilities?: Record<string, ModelCapabilities>
+}
+
 export type ModelOptionsResponse = {
   provider?: string
   model?: string
-  providers?: {
-    slug: string
-    name: string
-    models?: string[]
-    total_models?: number
-    is_current?: boolean
-    warning?: string
-  }[]
+  providers?: ModelOptionProvider[]
 }
 
 export type ImageAttachResponse = {

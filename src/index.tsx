@@ -9,12 +9,15 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { App } from "./app";
 import { parseLaunch, HELP, VERSION } from "./app/launch";
+import { handleEikonCli } from "./app/eikon-cli";
 import * as perf from "./utils/perf";
 import { warm as warmIO } from "./io";
 import { skills } from "./service/bundled-skills";
+import { plugins } from "./service/bundled-plugins";
 import * as control from "./app/control";
 import * as preferences from "./context/preferences";
 import { resetTerminalModes, installExitResetHooks } from "./utils/terminal-reset";
+import { clampStdoutDimensions } from "./utils/terminal-size";
 import { warmup as warmTokens } from "./utils/tokens";
 import { prime as primeTheme, DEFAULT_THEME } from "./theme";
 
@@ -24,6 +27,9 @@ import { prime as primeTheme, DEFAULT_THEME } from "./theme";
 perf.boot("import-graph", Bun.nanoseconds() / 1e6)
 
 const argv = Bun.argv.slice(2)
+if (argv[0] === "eikon" && argv[1] === "install") plugins.sync()
+const eikonCliExit = await handleEikonCli(argv)
+if (eikonCliExit !== null) process.exit(eikonCliExit)
 if (argv.includes("--help") || argv.includes("-h")) {
   process.stdout.write(HELP)
   process.exit(0)
@@ -43,6 +49,7 @@ const main = async () => {
   resetTerminalModes()
   // And on our own exit paths, so we don't poison the next process.
   installExitResetHooks()
+  clampStdoutDimensions()
 
   perf.mem("pre-renderer")
 
@@ -92,9 +99,10 @@ const main = async () => {
   warmTokens()
   warmIO()
   // First-launch copies only; steady state is two existsSync per
-  // bundled skill. Off the first-render path so a slow fs doesn't
+  // bundled skill/plugin. Off the first-render path so a slow fs doesn't
   // delay the frame.
   skills.sync()
+  plugins.sync()
 
   perf.mem("post-first-render")
 

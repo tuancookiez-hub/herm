@@ -39,7 +39,11 @@ async function setup(gw = new MockGateway()) {
       <box flexGrow={1} />
       <Composer
         ref={ref}
-        focused ready streaming={false} cmds={LOCAL_COMMANDS}
+        canSubmitPrompt={true}
+        focused={true}
+        ready={true}
+        streaming={false}
+        cmds={LOCAL_COMMANDS}
         onSend={(text, parts) => sent.push({ text, parts })}
         onSlash={() => {}}
       />

@@ -1,5 +1,16 @@
 # Test harness guide
 
+## Choosing the test tier
+
+- Pure helpers/reducers: import the function directly; no renderer.
+- `~/.hermes` readers/writers: use `tmpHome()` from `test/fixture/home`.
+- Component UI: use `mountNode()`; no global `useAppKeys` routing.
+- Shell/user flows: use `mount()` so app key routing and dialogs run.
+- Real process/CONTROL checks: use a sized pty + `/frame`; keep out of
+  default unit coverage unless explicitly scoped.
+- Host tools (git, chafa, ffmpeg, editors): gate or skip when the
+  binary/fixture is absent.
+
 ## Mount
 
 ```ts
@@ -18,6 +29,24 @@ await using t = await mountNode(<Foo ref={ref} />, { gw })
 `await using` → `[Symbol.asyncDispose]` destroys the renderer on
 block exit. Omit and call `t.destroy()` manually if you need to assert
 after cleanup.
+
+## Home fixtures
+
+```ts
+import { tmpHome } from "./fixture/home"
+
+await using h = await tmpHome({
+  config: { memory: { provider: "mem0" } },
+  files: { "memories/MEMORY.md": "one" },
+  prefs: { theme: "opencode" },
+})
+```
+
+`tmpHome()` creates a fresh `HERMES_HOME` and `HERM_CONFIG_DIR`, seeds
+files, calls `rehome()`, and restores the previous env on dispose. Use it
+for stateful service tests instead of sharing the preload sandbox. Dispose
+it after any renderer using it (`await using h` before `await using t`) so
+watchers close before the temp dir is removed.
 
 ## MockGateway
 

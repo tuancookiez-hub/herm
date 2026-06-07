@@ -166,7 +166,7 @@ export function toolTokens(tool: ToolInfo): number {
 
 type Opts = {
   contextLength: number
-  inputTokens: number
+  usedTokens?: number
   sections: ReadonlyArray<Section>
   conversationTokens: number
   tools: ReadonlyArray<ToolInfo>
@@ -258,13 +258,22 @@ export function build(opts: Opts): Segment[] {
     })
   }
   if (opts.conversationTokens > 0) {
-    const ct = Math.min(opts.conversationTokens, opts.inputTokens || opts.conversationTokens)
-    result.push({ id: "conversation", label: "Conversation", tokens: ct, percent: pct(ct) })
+    const ct = opts.conversationTokens
+    result.push({ id: "conversation", label: "~Conversation", tokens: ct, percent: pct(ct) })
   }
   const taken = result.reduce((s, g) => s + g.tokens, 0)
-  const free = Math.max(0, opts.contextLength - taken)
+  const used = opts.usedTokens
+  if (typeof used !== "number") {
+    const unknown = Math.max(0, opts.contextLength - taken)
+    if (unknown > 0) result.push({ id: "unknown", label: "Unknown (live unavailable)", tokens: unknown, percent: pct(unknown) })
+    return result
+  }
+  const unknown = Math.max(0, used - taken)
+  if (unknown > 0) result.push({ id: "unknown", label: "Unknown / Provider Overhead", tokens: unknown, percent: pct(unknown) })
+  const overage = Math.max(0, taken - used)
+  if (overage > 0) result.push({ id: "overage", label: "Estimate Overage", tokens: overage, percent: pct(overage) })
+  const free = Math.max(0, opts.contextLength - used)
   result.push({ id: "free", label: "Free", tokens: free, percent: pct(free) })
-
   return result
 }
 

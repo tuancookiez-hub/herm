@@ -1,12 +1,11 @@
 import { memo, useEffect, type ReactNode } from "react"
-import type { Message } from "../types/message"
+import type { Message, Usage } from "../types/message"
 import type { SessionInfo } from "../context/wire"
 import { Sessions } from "./Sessions"
 import { Context } from "./Context"
 import { Analytics } from "./Analytics"
 import { SubTabBar } from "../components/tabs/SubTabBar"
 import { SUB_TABS, SESSIONS_TAB } from "../app/tabs"
-import { useKeys } from "../keys"
 
 type Props = {
   focused?: boolean
@@ -20,6 +19,7 @@ type Props = {
   messages?: Message[]
   sessionStart: number
   info?: SessionInfo
+  usage?: Usage
 }
 
 // Consolidates the former Sessions / Context / Analytics tabs under a
@@ -30,14 +30,13 @@ type Props = {
 // mounting would duplicate traffic without a visible payoff (state is
 // cheap to rebuild from ~/.hermes on next switch).
 export const SessionsGroup = memo((props: Props) => {
-  const keys = useKeys()
   const labels = SUB_TABS[SESSIONS_TAB]
   // Clamp defensively — if the sub-tab list shrinks later, drifted
   // indices would render nothing.
   useEffect(() => {
     if (props.sub >= labels.length) props.setSub(0)
   }, [props.sub, labels.length])
-  const hint = `${keys.print("tab.prev")}/${keys.print("tab.next")} group  ·  shift+←/→ sub`
+  const hint = "shift+←/→ sub"
   return (
     <box flexDirection="column" flexGrow={1} minWidth={0}>
       <SubTabBar tabs={labels} active={props.sub} onChange={props.setSub} hint={hint} />
@@ -50,7 +49,7 @@ export const SessionsGroup = memo((props: Props) => {
         </Pane>
         <Pane visible={props.sub === 1}>
           <Context focused={!!props.focused && props.sub === 1}
-                   messages={props.messages} sessionStart={props.sessionStart} info={props.info} />
+                   messages={props.messages} sessionStart={props.sessionStart} info={props.info} usage={props.usage} />
         </Pane>
         <Pane visible={props.sub === 2}>
           <Analytics focused={!!props.focused && props.sub === 2} />

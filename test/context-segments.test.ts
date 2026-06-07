@@ -48,7 +48,7 @@ describe("classifyTools", () => {
   })
 })
 
-describe("build — 7-category taxonomy", () => {
+describe("build — context estimates", () => {
   const baseOpts = {
     contextLength: 200_000,
     inputTokens: 50_000,
@@ -57,7 +57,7 @@ describe("build — 7-category taxonomy", () => {
     tools: [] as ToolInfo[],
   }
 
-  test("produces system_prompt + system_tools + mcp_tools + memory + skills + conversation + free", () => {
+  test("produces estimated categories with explicit unknown when live usage is absent", () => {
     const sections: Section[] = [
       mkSection("soul", "SOUL.md", 500),
       mkSection("memory", "Memory Notes", 300),
@@ -80,7 +80,7 @@ describe("build — 7-category taxonomy", () => {
     const ids = got.map(g => g.id)
     expect(ids).toEqual([
       "system_prompt", "system_tools", "mcp_tools",
-      "memory", "skills", "conversation", "free",
+      "memory", "skills", "conversation", "unknown",
     ])
   })
 
@@ -111,25 +111,50 @@ describe("build — 7-category taxonomy", () => {
     expect(mem!.children?.map(c => c.id).sort()).toEqual(["mem0", "memory", "soul", "user"])
   })
 
-  test("zero-token categories are skipped", () => {
-    const got = build(baseOpts) // no sections, no tools, no conversation
+  test("zero live usage still renders free", () => {
+    const got = build({ ...baseOpts, usedTokens: 0 }) // no sections, no tools, no conversation
     expect(got.map(g => g.id)).toEqual(["free"])
   })
 
-  test("free = contextLength - sum(others) and is last", () => {
+  test("free = live used math, not estimated categories", () => {
     const sections: Section[] = [mkSection("project", "Project", 1000)]
     const tools: ToolInfo[] = [mkTool("x", 4000, 0)] // 4000 chars → 1000 tok
     const got = build({
       ...baseOpts,
       contextLength: 10_000,
+      usedTokens: 3500,
       sections,
       tools,
       conversationTokens: 2000,
     })
     const free = got[got.length - 1]
     expect(free.id).toBe("free")
-    // 10000 - (1000 + 1000 + 2000) = 6000
-    expect(free.tokens).toBe(6000)
+    // 10000 - live used 3500, independent of estimate sum.
+    expect(free.tokens).toBe(6500)
+    expect(got.find(g => g.id === "unknown")).toBeUndefined()
+  })
+
+  test("unknown records live used not explained by estimates", () => {
+    const got = build({
+      ...baseOpts,
+      contextLength: 10_000,
+      usedTokens: 5000,
+      sections: [mkSection("project", "Project", 1000)],
+      conversationTokens: 1000,
+    })
+    expect(got.find(g => g.id === "unknown")?.tokens).toBe(3000)
+    expect(got.at(-1)?.tokens).toBe(5000)
+  })
+
+  test("overage records estimates exceeding live used", () => {
+    const got = build({
+      ...baseOpts,
+      contextLength: 10_000,
+      usedTokens: 1000,
+      sections: [mkSection("project", "Project", 3000)],
+    })
+    expect(got.find(g => g.id === "overage")?.tokens).toBe(2000)
+    expect(got.at(-1)?.tokens).toBe(9000)
   })
 
   test("system_tools and mcp_tools partition tools correctly", () => {
@@ -155,7 +180,6 @@ describe("drill", () => {
     ]
     const [mem] = build({
       contextLength: 10_000,
-      inputTokens: 0,
       sections,
       conversationTokens: 0,
       tools: [],
@@ -169,7 +193,6 @@ describe("drill", () => {
     const tools: ToolInfo[] = [mkTool("terminal", 100, 100)]
     const [sys] = build({
       contextLength: 10_000,
-      inputTokens: 0,
       sections: [],
       conversationTokens: 0,
       tools,
@@ -182,7 +205,7 @@ describe("cells", () => {
   test("produces 256 cells", () => {
     const sections: Section[] = [mkSection("project", "P", 1000)]
     const segs = build({
-      contextLength: 10_000, inputTokens: 0, sections,
+      contextLength: 10_000, sections,
       conversationTokens: 0, tools: [],
     })
     expect(cells(segs)).toHaveLength(256)

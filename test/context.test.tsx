@@ -1,9 +1,10 @@
 import { describe, test, expect } from "bun:test"
 import { act } from "react"
 import { mountNode } from "./harness"
-import { Context } from "../src/tabs/Context"
+import { Context, contextMeter } from "../src/tabs/Context"
 import type { SessionInfo } from "../src/context/wire"
-import type { Message } from "../src/types/message"
+import type { Message, Usage } from "../src/types/message"
+import type { HermesConfig } from "../src/service/hermes-home"
 
 // Strip ANSI so regex matches the visual text, not escape codes.
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "")
@@ -23,7 +24,7 @@ describe("Context tab", () => {
   // CTX table fallback, so contexts on models not in CTX render
   // proportionally correctly.
   test("uses info.context_max for ctxLen", async () => {
-    const info: SessionInfo = { model: "gpt-4.1", context_max: 500_000 }
+    const info: SessionInfo = { model: "gpt-4.1", context_max: 500_000, context_used: 25_000 }
     const t = await mountNode(<Context info={info} />)
     // 500_000 formatted by fmt() → "500k"; surfaces in the status header
     // and the Free-space breakdown row.
@@ -33,7 +34,7 @@ describe("Context tab", () => {
 
   test("info.context_max overrides DEFAULT_CTX fallback", async () => {
     // DEFAULT_CTX = 128k; info claims 1M. Gateway must win.
-    const info: SessionInfo = { model: "gpt-4o", context_max: 1_000_000 }
+    const info: SessionInfo = { model: "gpt-4o", context_max: 1_000_000, context_used: 50_000 }
     const t = await mountNode(<Context info={info} />)
     const f = strip(t.frame())
     // 1_000_000 formats as "1.0M" via fmt()
@@ -43,10 +44,45 @@ describe("Context tab", () => {
     t.destroy()
   })
 
-  test("falls back to DEFAULT_CTX when info absent", async () => {
-    // No info, no session → DEFAULT_CTX (128k). Verify no crash.
-    const t = await mountNode(<Context />)
-    expect(strip(t.frame())).toContain("Context")
+  test("shows unavailable state when live used is absent", async () => {
+    const messages: Message[] = [
+      { id: "m1", role: "assistant", timestamp: 0, parts: [{ type: "text", content: "a", streaming: false }], usage: { input: 40_000, output: 10, total: 40_010 } },
+      { id: "m2", role: "assistant", timestamp: 1, parts: [{ type: "text", content: "b", streaming: false }], usage: { input: 50_000, output: 10, total: 50_010 } },
+    ]
+    const t = await mountNode(<Context messages={messages} info={{ model: "test", context_max: 100_000 }} />)
+    const f = strip(t.frame())
+    expect(f).toContain("live usage unavailable")
+    expect(f).toContain("~Conversation")
+    expect(f).not.toContain("90k / 100k")
+    expect(f).not.toContain("Context · 90k")
+    t.destroy()
+  })
+
+  test("uses app-level live usage before cumulative message input", async () => {
+    const messages: Message[] = [
+      { id: "m1", role: "assistant", timestamp: 0, parts: [{ type: "text", content: "a", streaming: false }], usage: { input: 40_000, output: 10, total: 40_010 } },
+      { id: "m2", role: "assistant", timestamp: 1, parts: [{ type: "text", content: "b", streaming: false }], usage: { input: 50_000, output: 10, total: 50_010 } },
+    ]
+    const usage: Usage = { input: 90_000, output: 20, total: 90_020, context_used: 12_000, context_max: 100_000 }
+    const t = await mountNode(<Context messages={messages} usage={usage} info={{ model: "test", context_max: 100_000 }} />)
+    const f = strip(t.frame())
+    expect(f).toContain("Context · 12k / 100k (12%)")
+    expect(f).not.toContain("90k / 100k")
+    expect(f).toContain("Free — 88k")
+    t.destroy()
+  })
+
+  test("uses resumed session.info usage before top-level context fields", async () => {
+    const info: SessionInfo = {
+      model: "test",
+      context_used: 70_000,
+      context_max: 100_000,
+      usage: { input: 1, output: 2, total: 3, context_used: 22_000, context_max: 80_000 },
+    }
+    const t = await mountNode(<Context info={info} />)
+    const f = strip(t.frame())
+    expect(f).toContain("Context · 22k / 80k (28%)")
+    expect(f).toContain("Free — 58k")
     t.destroy()
   })
 
@@ -54,6 +90,7 @@ describe("Context tab", () => {
     const info: SessionInfo = {
       model: "test",
       context_max: 10_000,
+      context_used: 1000,
       tools: { builtin: ["terminal"], mcp: ["mcp_search"] },
     }
     const t = await mountNode(<Context info={info} />)
@@ -64,13 +101,35 @@ describe("Context tab", () => {
     t.destroy()
   })
 
+  test("empty live tools do not fall back to legacy tool snapshots", async () => {
+    const t = await mountNode(<Context info={{ model: "test", context_max: 10_000, context_used: 1000, tools: {} }} />)
+    const f = strip(t.frame())
+    expect(f).not.toContain("System Tools")
+    expect(f).not.toContain("MCP Tools")
+    t.destroy()
+  })
+
+  test("config-only max fallback does not fabricate live usage", async () => {
+    const cfg = { model: { context_length: 64_000 } } as HermesConfig
+    expect(contextMeter(undefined, undefined, cfg)).toEqual({ max: 64_000, used: undefined })
+    expect(contextMeter(undefined, undefined, { model: { context_length: 0 } } as HermesConfig)).toEqual({ max: 128_000, used: undefined })
+    expect(contextMeter(undefined, undefined, { model: { context_length: -1 } } as HermesConfig)).toEqual({ max: 128_000, used: undefined })
+
+    const t = await mountNode(<Context />)
+    const f = strip(t.frame())
+    expect(f).toContain("limit 128k")
+    expect(f).toContain("live usage unavailable")
+    expect(f).not.toContain("Context · 0 / 128k")
+    t.destroy()
+  })
+
   // In-grid threshold marker (◼ in textMuted past threshold) + ×N badge.
   describe("threshold marker", () => {
     test("renders '×N compressed' badge when compressions > 0", async () => {
       const info: SessionInfo = {
         model: "claude-opus-4-7",
         context_max: 200_000,
-        usage: { input: 100, output: 50, total: 150, compressions: 3 },
+        usage: { input: 100, output: 50, total: 150, context_used: 40_000, context_max: 200_000, compressions: 3 },
       }
       const t = await mountNode(<Context info={info} />)
       expect(strip(t.frame())).toContain("×3 compressed")
@@ -81,7 +140,7 @@ describe("Context tab", () => {
       const info: SessionInfo = {
         model: "claude-opus-4-7",
         context_max: 200_000,
-        usage: { input: 100, output: 50, total: 150, compressions: 0 },
+        usage: { input: 100, output: 50, total: 150, context_used: 40_000, context_max: 200_000, compressions: 0 },
       }
       const t = await mountNode(<Context info={info} />)
       expect(strip(t.frame())).not.toMatch(/×\d/)
@@ -89,20 +148,46 @@ describe("Context tab", () => {
     })
 
     test("no badge when usage absent", async () => {
-      const info: SessionInfo = { model: "claude-opus-4-7", context_max: 200_000 }
+      const info: SessionInfo = { model: "claude-opus-4-7", context_max: 200_000, context_used: 40_000 }
       const t = await mountNode(<Context info={info} />)
       expect(strip(t.frame())).not.toMatch(/×\d/)
       t.destroy()
     })
 
     test("cells past threshold render ◼ in the grid", async () => {
-      const info: SessionInfo = { model: "claude-opus-4-7", context_max: 200_000 }
+      const info: SessionInfo = { model: "claude-opus-4-7", context_max: 200_000, context_used: 40_000 }
       const t = await mountNode(<Context info={info} />)
       const f = strip(t.frame())
       // All-free fixture, threshold 0.5 → rows 0-7 are ◻, rows 8-15 are ◼.
       // Assert on a run so the Breakdown legend's lone ◼ can't satisfy it.
       expect(f).toContain("◼ ◼ ◼ ◼")
       expect(f).toContain("◻ ◻ ◻ ◻")
+      t.destroy()
+    })
+
+    test("drilled groups hide full-window compression markers", async () => {
+      const info: SessionInfo = {
+        model: "claude-opus-4-7",
+        context_max: 200_000,
+        usage: {
+          input: 100,
+          output: 50,
+          total: 150,
+          context_used: 40_000,
+          context_max: 200_000,
+          compressions: 3,
+        },
+        system_prompt: "# Project Context\n" + "project context ".repeat(100) + "\nConversation started:",
+      }
+      const t = await mountNode(<Context focused info={info} />)
+      act(() => t.keys.pressArrow("down"))
+      act(() => t.keys.pressEnter())
+      await t.settle()
+
+      const f = strip(t.frame())
+      expect(f).toContain("Breakdown · System Prompt")
+      expect(f).not.toContain("×3 compressed")
+      expect(f).not.toContain("Beyond compression threshold")
       t.destroy()
     })
   })
@@ -151,7 +236,7 @@ describe("Context tab", () => {
       parts: [{ type: "text", content: "hello world ".repeat(50), streaming: false }],
       usage: { input: 200, output: 0, total: 200 },
     }]
-    const info: SessionInfo = { model: "test", context_max: 10_000 }
+    const info: SessionInfo = { model: "test", context_max: 10_000, context_used: 1000 }
     const legend = (f: string) => f.split("\n").find(l => l.includes(" tok ")) ?? ""
 
     test("↓ selects first; clamps at last; ← steps back; Esc clears", async () => {
@@ -163,10 +248,10 @@ describe("Context tab", () => {
       await t.settle()
       expect(legend(strip(t.frame()))).toContain("Conversation")
 
-      // Two segs → three ↓ clamps on Free (list.* clamps, does not wrap)
-      act(() => { t.keys.pressArrow("down"); t.keys.pressArrow("down"); t.keys.pressArrow("down") })
+      // Three segs → two ↓ lands on Unknown / Provider Overhead.
+      act(() => { t.keys.pressArrow("down"); t.keys.pressArrow("down") })
       await t.settle()
-      expect(legend(strip(t.frame()))).toContain("Free")
+      expect(legend(strip(t.frame()))).toContain("Unknown / Provider Overhead")
 
       // ← alias behaves like list.up
       act(() => t.keys.pressArrow("left"))

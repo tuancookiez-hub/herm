@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
-import { join } from "path"
+import { dirname, join } from "path"
 import { parseEikon, listEikons } from "../src/components/avatar/eikon"
+import { bundledEikonPath } from "../src/components/avatar/bundled"
 
 const FIXTURE = [
   JSON.stringify({ eikon: 1, name: "tiny", width: 4, height: 2, author: "t", states: ["idle", "error"] }),
@@ -12,6 +13,28 @@ const FIXTURE = [
   JSON.stringify({ state: "error", frame_count: 2 }),
   JSON.stringify({ f: 0, data: " x \n/|\\", duration_ms: 100 }),
   JSON.stringify({ f: 1, data: " X \n/|\\", duration_ms: 50 }),
+].join("\n")
+
+const LAUNCH_FIXTURE = [
+  JSON.stringify({
+    type: "header",
+    eikon: 1,
+    id: "test/tiny-launch",
+    version: "1.0.0",
+    title: "tiny launch",
+    author: { name: "t" },
+    size: { cols: 3, rows: 2 },
+    defaultSignal: "state.idle",
+    signals: {
+      "state.idle": { clip: "idle" },
+      "state.error": { clip: "error", fallback: "state.idle" },
+    },
+  }),
+  JSON.stringify({ type: "clip", name: "idle", fps: 8, frameCount: 2, loopFrom: 0 }),
+  JSON.stringify({ type: "frame", clip: "idle", index: 0, rows: [" o ", "/|\\"] }),
+  JSON.stringify({ type: "frame", clip: "idle", index: 1, rows: [" O ", "/|\\"] }),
+  JSON.stringify({ type: "clip", name: "error", fps: 4, frameCount: 1, loopFrom: 1 }),
+  JSON.stringify({ type: "frame", clip: "error", index: 0, rows: [" x ", "/|\\"] }),
 ].join("\n")
 
 describe("parseEikon", () => {
@@ -79,6 +102,17 @@ describe("parseEikon", () => {
     // loop:false wins over loop_from (deprecated alias, but unambiguous intent)
     expect(parseEikon(mk({ loop: false, loop_from: 1 })).states.get("s")!.loopFrom).toBe(3)
   })
+
+  test("parses launch-format streams", () => {
+    const e = parseEikon(LAUNCH_FIXTURE)
+    expect(e.meta.name).toBe("tiny launch")
+    expect(e.meta.version).toBe(1)
+    expect(e.meta.width).toBe(3)
+    expect(e.meta.height).toBe(2)
+    expect(e.states.has("idle")).toBe(true)
+    expect(e.states.get("idle")!.frames[0]).toEqual([" o ", "/|\\"])
+    expect(e.states.get("error")!.loopFrom).toBe(1)
+  })
 })
 
 describe("listEikons", () => {
@@ -91,5 +125,44 @@ describe("listEikons", () => {
     expect(found[0].meta.name).toBe("tiny")
     expect(found[0].meta.states).toEqual(["idle", "error"])
     expect(found[0].path).toContain("a.eikon")
+  })
+
+  test("prefers package manifest entrypoint over sibling non-entrypoint streams", () => {
+    const dir = mkdtempSync(join(tmpdir(), "eikon-"))
+    writeFileSync(join(dir, "standalone.eikon"), FIXTURE)
+    const pkg = join(dir, "pkg")
+    mkdirSync(pkg)
+    writeFileSync(join(pkg, "manifest.json"), JSON.stringify({
+      kind: "eikon.package",
+      schemaVersion: "1.0",
+      id: "test/pkg",
+      name: "pkg",
+      compatibility: { eikon: ">=1 <2" },
+      entrypoints: { default: "streams/pkg.eikon" },
+      files: [{ path: "streams/pkg.eikon", role: "runtime", mediaType: "application/vnd.eikon.stream+jsonl" }],
+    }))
+    mkdirSync(join(pkg, "streams"))
+    writeFileSync(join(pkg, "streams", "pkg.eikon"), LAUNCH_FIXTURE)
+    writeFileSync(join(pkg, "pkg.eikon"), FIXTURE)
+    writeFileSync(join(pkg, "extra.eikon"), LAUNCH_FIXTURE)
+
+    const found = listEikons([dir])
+    const paths = found.map(e => e.path)
+    expect(paths.some(p => p.endsWith("standalone.eikon"))).toBe(true)
+    expect(paths.some(p => p.endsWith("streams/pkg.eikon"))).toBe(true)
+    expect(paths.some(p => p.endsWith("pkg/pkg.eikon"))).toBe(false)
+    expect(paths.some(p => p.endsWith("extra.eikon"))).toBe(false)
+  })
+
+  test("bundled eikons ship as package runtime streams and list once", () => {
+    const p = bundledEikonPath("default")!
+    expect(p).toEndWith("default.eikon")
+    expect(existsSync(join(dirname(p), "manifest.json"))).toBe(true)
+    const e = parseEikon(readFileSync(p, "utf8"))
+    expect(e.meta.width).toBe(48)
+    expect(e.states.has("idle")).toBe(true)
+    const found = listEikons([join(import.meta.dir, "../assets/eikons")])
+    expect(found.filter(e => e.meta.name.toLowerCase() === "nous")).toHaveLength(1)
+    expect(found.every(e => e.path.endsWith(".eikon"))).toBe(true)
   })
 })

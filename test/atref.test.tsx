@@ -54,7 +54,7 @@ describe("atref frecency ranking", () => {
     const t: Harness = await mountNode(
       <box flexDirection="column" flexGrow={1} width="100%" height="100%">
         <box flexGrow={1} />
-        <Composer ref={ref} focused ready streaming={false} cmds={[]}
+        <Composer ref={ref} focused canSubmitPrompt={true} ready streaming={false} cmds={[]}
           onSend={() => {}} onSlash={() => {}} />
       </box>,
       { gw, width: 120, height: 30 },

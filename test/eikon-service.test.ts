@@ -36,7 +36,7 @@ describe("service/eikon: layout", () => {
     expect(r.glyph).toBe("◆")
   })
 
-  test("list returns folder-form only; header source_url surfaces", () => {
+  test("list returns folder-form only; legacy header source_url is a fallback", () => {
     writeFileSync(eikon.file("foo"), JSON.stringify({ eikon: 1, name: "foo", source_url: "http://x/foo/" }) + "\n")
     eikon.ensure("bar"); writeFileSync(eikon.file("bar"), '{"eikon":1,"name":"bar"}\n')
     writeFileSync(join(HH, "eikons", "flat.eikon"), "{}")
@@ -75,7 +75,7 @@ describe("service/eikon: registry", () => {
 
 describe("service/eikon: save", () => {
   const run = caps.ffmpeg ? test : test.skip
-  run("save writes .eikon + studio.json + pref + revision", async () => {
+  run("save writes launch stream, preserves legacy source_url as manifest origin, and bumps revision", async () => {
     const before = eikon.revision()
     eikon.ensure("pack")
     // Valid 16×16 gray PNG via ffmpeg so native can decode it.
@@ -92,8 +92,10 @@ describe("service/eikon: save", () => {
     const doc = parseEikon(readFileSync(out, "utf8"))
     expect(doc.meta.width).toBe(48)
     expect(doc.states.size).toBe(6)
-    // source_url header survives a save.
-    expect(eikon.header(out)!.source_url).toBe("http://x/pack/")
+    expect(eikon.header(out)!.source_url).toBeUndefined()
+    const man = JSON.parse(readFileSync(join(eikon.dir("pack"), "manifest.json"), "utf8"))
+    expect(man.origin.source).toBe("http://x/pack/")
+    expect(eikon.list().find(x => x.name === "pack")!.sourceUrl).toBe("http://x/pack/")
   })
 
   test("save with no source writes glyph placeholder frames", async () => {
@@ -110,6 +112,7 @@ describe("service/eikon: fetchSource", () => {
   const body = (name: string) => {
     if (name === "manifest.json") return Response.json({
       name: "remix", source: "source.png",
+      license: "MIT", provenance: "made by Kaio",
       states: { idle: { file: "states/idle.mp4" }, error: { file: "states/error.mp4" } },
     })
     if (name === "source.png") return new Response(png)
@@ -129,10 +132,27 @@ describe("service/eikon: fetchSource", () => {
     expect(existsSync(join(eikon.sourceDir("remix"), "idle.mp4"))).toBe(true)
     // studio.json + manifest.json (with origin) both written.
     expect(eikon.readStudio("remix")!.sources.error).toBe("error.mp4")
+    writeFileSync(eikon.file("remix"), '{"eikon":1,"name":"remix"}\n')
     const man = JSON.parse(readFileSync(join(eikon.dir("remix"), "manifest.json"), "utf8"))
     expect(man.origin.source).toBe(url)
+    expect(eikon.list().find(x => x.name === "remix")!.manifest!.origin).toEqual(man.origin)
+    expect(man.license).toBeUndefined()
+    expect(man.provenance).toBeUndefined()
     // peekSource memoized — second call same Promise.
     expect(eikon.peekSource(url)).toBe(eikon.peekSource(url))
+    srv.stop()
+  })
+
+  test("fetchSource can install without source media", async () => {
+    const srv = Bun.serve({ port: 0, fetch: r => body(new URL(r.url).pathname.split("/").pop()!) })
+    const url = `http://localhost:${srv.port}/nosource/`
+    const out = await eikon.fetchSource(url, { name: "nosource", media: false })
+    expect(out.name).toBe("nosource")
+    expect(out.n).toBe(3)
+    expect(out.bytes).toBe(0)
+    expect(out.sources).toEqual({})
+    expect(eikon.readStudio("nosource")!.sources).toEqual({})
+    expect(existsSync(join(eikon.sourceDir("nosource"), "idle.mp4"))).toBe(false)
     srv.stop()
   })
 

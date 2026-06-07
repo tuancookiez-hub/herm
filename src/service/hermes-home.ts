@@ -68,6 +68,7 @@ export interface HermesConfig {
     default: string;
     provider: string;
     base_url: string;
+    context_length?: number;
   };
   agent: {
     max_turns: number;
@@ -460,6 +461,7 @@ export async function readConfig(): Promise<HermesConfig | null> {
         default: raw?.model?.default ?? "unknown",
         provider: raw?.model?.provider ?? "auto",
         base_url: raw?.model?.base_url ?? "",
+        context_length: raw?.model?.context_length,
       },
       agent: {
         max_turns: raw?.agent?.max_turns ?? 60,

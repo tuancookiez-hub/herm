@@ -30,6 +30,8 @@ import { openConfirm, openSaveDiscard } from "../dialogs/confirm"
 import { openTextPrompt } from "../dialogs/text-prompt"
 import { openPathPrompt } from "../dialogs/path-prompt"
 import { openGenerate, type GenerateKind } from "../dialogs/eikon-generate"
+import { openEikonSubmit } from "../dialogs/eikon-submit"
+import * as submitSvc from "../service/eikon-submit"
 import { gen } from "../service/eikon-gen"
 import { useGateway } from "../context/gateway"
 import { openNewEikon } from "../dialogs/new-eikon"
@@ -75,7 +77,6 @@ const HEAD: readonly Row[] = [
   { id: "open",       kind: "select", label: "eikon" },
   { id: "rasterizer", kind: "select", label: "rasterizer" },
   { id: "source",     kind: "prompt", label: "source" },
-  // { id: "glyph",   kind: "prompt", label: "glyph" }, // reserved — PRD § 3
   { id: "-1",         kind: "divider", label: "" },
   { id: "fetch",      kind: "action", label: "fetch source",
     show: (s, live, url) => !live && !!url },
@@ -107,6 +108,7 @@ const HELP: Readonly<Record<string, string>> = {
   fetch:      "Download this eikon's published source media so you can re-tune it locally.",
   knobsfor:   "←→ toggles whether the settings below apply to every state or just the one selected in the strip.",
   reset:      "Restore every setting below to this rasterizer's defaults and drop per-state overrides.",
+  submit:     "Submit this local eikon after backend preflight.",
   revert:     "Throw away unsaved edits and reload this eikon from disk.",
 }
 
@@ -816,7 +818,7 @@ export const EikonStudio = memo((props: {
       return switchTo(res.name)
     }
     toast.show({ variant: "info", message: `Installing '${res.name}' from ${res.src}…` })
-    await eikon.fetchSource(res.src, { name: res.name })
+    await eikon.installPackage(res.src, { name: res.name })
       .then(out => {
         toast.show({ variant: "success", message: `Installed '${out.name}' (${out.n} files)` })
         void switchTo(out.name)
@@ -858,7 +860,7 @@ export const EikonStudio = memo((props: {
     })
     if (!src) return
     toast.show({ variant: "info", message: `Installing from ${src}…` })
-    await eikon.fetchSource(src)
+    await eikon.installPackage(src)
       .then(out => {
         toast.show({ variant: "success", message: `Installed '${out.name}' (${out.n} files)` })
         void switchTo(out.name)
@@ -885,9 +887,26 @@ export const EikonStudio = memo((props: {
     )
   }, [dialog, eikonOptions, switchTo, doNew, doInstall])
 
+  const doSubmit = useCallback(async () => {
+    const cur = sRef.current
+    if (!cur) return
+    const path = submitSvc.submitPath(cur.name)
+    const pub = submitSvc.publishedInfo(path)
+    if (pub) {
+      toast.show({ variant: "warning", title: "Published eikon", message: "Create a local draft before submitting", duration: 6000 })
+      return
+    }
+    await openEikonSubmit(dialog, {
+      name: cur.name,
+      path,
+      submit: submitSvc.submit,
+    })
+  }, [dialog, toast])
+
   const doAction = async (id: string) => {
     if (!s) return
     if (id === "knobsfor") return mutate(p => p.per[p.state] ? knobs.unfork(p) : knobs.fork(p))
+    if (id === "submit") { void doSubmit(); return }
     if (id === "revert") { void discard(); return }
     if (id === "reset") {
       const ok = await openConfirm(dialog, { title: "Reset settings?", body: "Restore rasterizer defaults and drop all per-state overrides.", danger: true })
@@ -994,6 +1013,7 @@ export const EikonStudio = memo((props: {
 
   useKeyboard((key: ParsedKey) => {
     if (!props.focused || dialog.open()) return
+    if (key.name === "u" && sRef.current) return void doSubmit()
     if (key.eventType === "release") return
     if (keys.match("eikon.save", key)) { if (!saving) void doSave(); return }
     if (key.name === "escape") return void discard()
@@ -1073,7 +1093,7 @@ export const EikonStudio = memo((props: {
 
   const hint: Array<readonly [string, string]> =
     !s                   ? [["Enter", "new eikon"], ["Shift+→", "gallery"]]
-  : pane === "knobs"   ? [["↑↓", "row"], ["←→", "adjust"], [keys.print("list.activate"), "edit"], [keys.print("list.new"), "new"], [keys.print("eikon.save"), "save"], ["Tab", "pane"]]
+  : pane === "knobs"   ? [["↑↓", "row"], ["←→", "adjust"], [keys.print("list.activate"), "edit"], [keys.print("list.new"), "new"], ["u", "submit"], [keys.print("eikon.save"), "save"], ["Tab", "pane"]]
   : pane === "preview" ? [["↑↓", "row"], ["←→", "adjust"], [keys.print("list.toggle"), "play/pause"], ["wheel", "pan"], ["Ctrl+wheel", "zoom"], [keys.print("eikon.save"), "save"], ["Tab", "pane"]]
   :                      [["←→", "state"], [keys.print("list.activate"), "actions"], [keys.print("eikon.save"), "save"], ["Tab", "pane"]]
 
@@ -1128,7 +1148,8 @@ export const EikonStudio = memo((props: {
             <text fg={theme.textMuted}>No eikon open. Enter to create or pick one.</text>
           </box>
         : <>
-            <scrollbox ref={ksb} scrollY flexGrow={1} contentOptions={COL}>
+            <scrollbox id="studio-knob-scroll" ref={ksb} scrollY flexGrow={1} contentOptions={COL}
+                       onMouseScroll={(e: MouseEvent) => e.stopPropagation()}>
               {rows.map((row, i) => {
                 const ni = navRows.findIndex(x => x.i === i)
                 const on = pane === "knobs" && ni === sel

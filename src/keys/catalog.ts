@@ -70,8 +70,8 @@ export const DEFAULTS = {
   "input.submit":      def("return",               "Send",                               "composer"),
   "input.newline":     def("shift+return,ctrl+return,alt+return,ctrl+j", "Insert newline", "composer"),
   "sessions.rename":   def("ctrl+r",               "Retitle session",                    "sessions"),
-  "sessions.prev":     def("left",                 "Walk lineage back (continues from)", "sessions"),
-  "sessions.next":     def("right",                "Walk lineage forward (compressed to)", "sessions"),
+  "sessions.prev":     def("left",                 "Previous source filter",             "sessions"),
+  "sessions.next":     def("right",                "Next source filter",                 "sessions"),
   "agents.kill":       def("k",                    "Kill subagent",                      "agents"),
   "agents.history":    def("h",                    "Spawn history",                      "agents"),
   "agents.install":    def("i",                    "Install distribution",               "agents"),
@@ -91,7 +91,7 @@ export function inScope(s: Scope): ActionId[] {
 // global fires everywhere; list is active on every admin tab alongside that
 // tab's own scope; dialog and composer are modal/focused surfaces that
 // displace the rest; distinct tab scopes are mutually exclusive.
-const TAB_SCOPES = new Set<Scope>(["sessions", "cron", "env", "agents", "skills", "config"])
+const TAB_SCOPES = new Set<Scope>(["sessions", "cron", "env", "agents", "skills", "config", "eikon"])
 export function scopesOverlap(a: Scope, b: Scope): boolean {
   if (a === b) return true
   if (a === "global" || b === "global") return true

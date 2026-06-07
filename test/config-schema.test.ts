@@ -25,6 +25,21 @@ describe("schema", () => {
     }
   })
 
+  test("kanban profile cap parity keys are present", () => {
+    expect(SCHEMA["kanban.default_assignee"]).toMatchObject({
+      type: "str",
+      default: "",
+      group: "kanban",
+    })
+    expect(SCHEMA["kanban.max_in_progress_per_profile"]).toMatchObject({
+      type: "null",
+      default: null,
+      group: "kanban",
+    })
+    expect(SCHEMA["kanban.max_in_progress_per_profile"].doc).toContain("Per-profile concurrency cap")
+    expect(SCHEMA["kanban.max_in_progress_per_profile"].doc).toContain("positive int")
+  })
+
   test("group is first dotted segment (or 'general' for root keys)", () => {
     for (const k of SCHEMA_KEYS) {
       const want = k.includes(".") ? k.split(".")[0] : "general"

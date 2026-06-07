@@ -91,6 +91,23 @@ See [`.env.example`](./.env.example) for rarely-needed overrides.
 - Open board and task detail views, inspect diagnostics, and dispatch work from
   the same shell you use for chat.
 
+### Share and install eikons
+
+- Open Eikon → Marketplace, or run `/marketplace`, to browse shared catalog
+  entries.
+- Preview the selected eikon, install without activating, then use it when
+  ready.
+- Use `eikon.liftaris.dev` as a discovery gallery only; it previews catalog
+  entries and gives copyable Herm install instructions.
+- Submit local non-bundled eikons from Studio with `u`; Herm shows the exact
+  preflight bundle before submission and blocks published marketplace installs
+  from duplicate submission.
+
+Herm owns native Marketplace behavior. The eikon repo owns the registry,
+browser mirror, shared catalog/player exports, install resolver, and publish
+preflight. Herm imports public eikon package exports rather than browser mirror
+internals or unexported source paths.
+
 ### Customize the shell
 
 - Press `Ctrl+K` for the command palette.
