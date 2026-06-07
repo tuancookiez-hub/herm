@@ -8,6 +8,7 @@ import type { Usage } from "../../types/message"
 import { useGitBranch, rtrunc } from "../../utils/git"
 import { Tail } from "../chat/ThoughtCloud"
 import { ContextGauge } from "./ContextGauge"
+import { CronStatus } from "./CronStatus"
 import { OverheadGauge } from "./OverheadGauge"
 
 export type HiddenContext = {
@@ -174,6 +175,7 @@ export const Sidebar = memo((props: {
         })() : null}
 
         <box flexGrow={1} />
+        <CronStatus width={INNER} />
         <OverheadGauge info={info} usage={props.usage} width={INNER} />
         <ContextGauge info={info} usage={props.usage} width={INNER} />
       </box>
