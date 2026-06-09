@@ -73,6 +73,15 @@ afterEach(async () => {
   const prefs = await import("../src/context/preferences")
   prefs.reset()
   rmSync(join(cfg, "tui.json"), { force: true })
+  // sessions-db.ts caches its sqlite connection at module level; without
+  // a reset it keeps reading the old sandbox's state.db across tests.
+  const { resetDb } = await import("../src/service/sessions-db")
+  resetDb()
+  // Wipe the state.db file so tests that seed it (analytics, launch,
+  // splash) don't leak rows into later tests (app, sessions).
+  rmSync(join(process.env.HERMES_HOME!, "state.db"), { force: true })
+  rmSync(join(process.env.HERMES_HOME!, "state.db-wal"), { force: true })
+  rmSync(join(process.env.HERMES_HOME!, "state.db-shm"), { force: true })
 })
 
 // AnimatedAvatar ticks via setTimeout outside act() — harmless, but noisy.

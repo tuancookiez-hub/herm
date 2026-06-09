@@ -134,12 +134,12 @@ await $`cp README.md LICENSE dist/`
 // Runtime dynamic-import assets. Bun does not include variable imports
 // like import(`./themes/${name}.json`) in the bundle, so the published
 // package must ship the JSON bodies beside index.js.
-await $`cp -r src/theme/themes dist/themes`
+await $`cp -R src/theme/themes dist/themes`
 // Runtime fs-read assets (eikon avatars). These aren't `with {type:
 // "file"}` imports — listEikons() readdirs the directory — so the
 // directory has to ship alongside index.js. bundled.ts resolves it
 // by walking up from import.meta.dir, which in the bundle is dist/.
-await $`cp -r assets dist/`
+await $`cp -R assets dist/`
 
 const sizes = result.outputs
   .map(o => [o.path.replace(/^.*\/dist\//, ""), (o.size / 1024).toFixed(0) + " KB"])

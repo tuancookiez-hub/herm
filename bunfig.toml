@@ -9,3 +9,4 @@ save = true
 
 [test]
 preload = ["./test/preload.ts"]
+root = "./test"

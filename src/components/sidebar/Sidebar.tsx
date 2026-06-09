@@ -8,7 +8,10 @@ import type { Usage } from "../../types/message"
 import { useGitBranch, rtrunc } from "../../utils/git"
 import { Tail } from "../chat/ThoughtCloud"
 import { ContextGauge } from "./ContextGauge"
+import { CronStatus } from "./CronStatus"
 import { FilterChip } from "../../ui/filter-chip"
+import { OverheadGauge } from "./OverheadGauge"
+import { ReasoningRow } from "./ReasoningRow"
 
 export type SidebarPreview = {
   key: string
@@ -168,6 +171,7 @@ export const Sidebar = memo((props: {
           <Row label="Profile" value={props.profile ?? "default"}
                strong={!!props.profile && props.profile !== "default"} />
           <Row label="Model" value={info?.model ?? "—"} />
+          <ReasoningRow />
           {info?.cwd ? <Row label="cwd" value={info.cwd} /> : null}
           {branch ? <Row label="Branch" value={rtrunc(branch, INNER - PAD_L - 2)} /> : null}
 
@@ -197,8 +201,11 @@ export const Sidebar = memo((props: {
         </>}
 
         <box flexGrow={1} />
-        {!props.preview ? <ContextGauge info={info} usage={props.usage} width={INNER} /> : null}
+<CronStatus width={INNER} />
+          <OverheadGauge info={info} usage={props.usage} width={INNER} />
+          {!props.preview ? <ContextGauge info={info} usage={props.usage} width={INNER} /> : null}
       </box>
     </box>
   )
 })
+

@@ -1,6 +1,6 @@
 {
   "name": "herm-tui",
-  "version": "1.0.0-dev.1",
+  "version": "1.9.0-dev.11",
   "private": true,
   "description": "A modern TUI for Hermes Agent",
   "type": "module",
@@ -36,11 +36,12 @@
   },
   "dependencies": {
     "@opentui/core": "0.2.2",
+    "@opentui/core-win32-x64": "0.2.2",
     "@opentui/react": "0.2.2",
     "eikon": "github:liftaris/eikon#5b4d82d864e640d51f6cf8cd62c08015302a28a8",
     "gpt-tokenizer": "^3.4.0",
     "open": "^11.0.0",
-    "react": "^19.2.5",
+    "react": "19.2.6",
     "web-tree-sitter": "0.25.10",
     "yaml": "^2.8.4"
   },
@@ -53,3 +54,4 @@
     "typescript": "^5.9.3"
   }
 }
+
