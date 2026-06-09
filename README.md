@@ -174,6 +174,69 @@ bun run typecheck
 bun test
 ```
 
+## Differences from Upstream
+
+This is a personal fork of [liftaris/herm](https://github.com/liftaris/herm)
+tracking `v1.9.0-dev.22` with local customizations. It is **not** a
+drop-in replacement for upstream — the changes below stay in `dev` and
+are not contributed back. Sync the base branch (`git fetch upstream &&
+git rebase v1.9.0-dev.<latest>`) before pulling in new upstream
+features.
+
+### Sidebar additions
+
+Four extra widgets render in the sidebar's identity block, above the
+existing `ContextGauge`:
+
+| Widget | File | Purpose |
+|---|---|---|
+| `CronStatus` | `src/components/sidebar/CronStatus.tsx` | Live summary of active cron jobs polled via `cron.manage` |
+| `ReasoningRow` | `src/components/sidebar/ReasoningRow.tsx` | Reads `agent.reasoning_effort` from `useHome("config")` |
+| `ProviderRow` | `src/components/sidebar/ProviderRow.tsx` | Resolves the model's owning provider; reads `~/.hermes/models_dev_cache.json` first, then `config.providers[].models[]`, then a small prefix-inference table, then em-dash |
+| `OverheadGauge` | `src/components/sidebar/OverheadGauge.tsx` | Stacked-bar breakdown of context overhead (Identity / Context / Skills / Memory / Tools / Guidance) with a 2-row legend |
+
+The `Provider` row is the non-obvious one: it handles
+`*`-free models correctly (e.g. `deepseek-v4-flash-free` resolves to
+**OpenCode Zen**, not **DeepSeek**, because that's where the catalog
+lists it). Pure UI work — no `SessionInfo` wire-type changes, no
+gateway edits, no Python changes. The widget re-reads
+`models_dev_cache.json` at most once per session via a module-scope
+Promise cache.
+
+### Build / runtime pins
+
+- `package.json` pins `react` to `19.2.6` exact (upstream uses `^19.2.5`).
+  Some `v1.9.0-dev.*` tags shipped React internals drift that surfaced
+  as `ReactSharedInternals.H is null` after a `bun install`; the exact
+  pin matches the version this fork was built and tested against.
+- `scripts/build.ts` is patched to use `cpSync()` from `node:fs` instead
+  of the shell `cp -r` calls. The shell variant fails on Windows
+  (`cp: illegal option -- r`); `cpSync()` is cross-platform and drops
+  the MSYS dependency. The build output is otherwise identical.
+- `package.json` `version` is stamped to the current upstream tag
+  (`1.9.0-dev.22`); upstream's root `package.json` is the placeholder
+  `1.0.0-dev.1` and the real version only lands in `dist/package.json`
+  on CI. This fork stamps both, so `herm --version` reports the real
+  tag locally.
+
+### Test harness tweaks
+
+- `test/preload.ts` keeps the OpenTUI `TreeSitterClient` singleton
+  alive across the suite (Bun 1.3.x segfaults under the standard
+  per-test spawn/terminate churn — see the comments in the file).
+- `test/rehome.test.ts` and `test/git.test.ts` exercise the env-rebind
+  path for `src/home/rehome.ts`.
+
+### What this fork does NOT carry
+
+- No changes to gateway behavior, RPC handlers, or event mapping.
+- No edits to `src/context/wire.ts` `SessionInfo` — the wire type
+  still lacks a `provider` field; the `ProviderRow` widget resolves
+  that locally instead of pushing the field through the gateway.
+- No contributed PRs to upstream. To propose one of these changes
+  upstream, rebase onto `origin/dev`, drop the local-only pieces,
+  and open a PR against `liftaris/herm#dev`.
+
 ## Acknowledgments
 
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) - the agent
