@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test"
 import { mkdirSync, mkdtempSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
-import { join } from "path"
+import { join, normalize } from "path"
 
 // rehome() mutates module singletons (process.env, hermes-home cell,
 // sessions-db path, the `home` store). Snapshot the sandbox home the
@@ -35,9 +35,9 @@ describe("rehome", () => {
   test("rebinds hermesPath and process.env", () => {
     rehome(A)
     expect(process.env.HERMES_HOME).toBe(A)
-    expect(hermesPath("config.yaml")).toBe(join(A, "config.yaml"))
+    expect(normalize(hermesPath("config.yaml"))).toBe(normalize(join(A, "config.yaml")))
     rehome(B)
-    expect(hermesPath("config.yaml")).toBe(join(B, "config.yaml"))
+    expect(normalize(hermesPath("config.yaml"))).toBe(normalize(join(B, "config.yaml")))
     // io worker reads process.env.HERMES_HOME per request — this is
     // what the next io.* call will send as `home`.
     expect(process.env.HERMES_HOME).toBe(B)

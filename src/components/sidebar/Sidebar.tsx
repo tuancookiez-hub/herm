@@ -10,6 +10,7 @@ import { Tail } from "../chat/ThoughtCloud"
 import { ContextGauge } from "./ContextGauge"
 import { CronStatus } from "./CronStatus"
 import { OverheadGauge } from "./OverheadGauge"
+import { ReasoningRow } from "./ReasoningRow"
 
 export type HiddenContext = {
   profile?: string
@@ -139,14 +140,11 @@ export const Sidebar = memo((props: {
            border={["top", "left", "right"]} borderStyle="double"
            borderColor={theme.hermAvatar}>
 
-        {/* Flat identity block — Title is primary (always rendered so the
-            block doesn't reflow when `/title` fires), then Profile
-            (which IS agent lineage — each profile is an isolated
-            HERMES_HOME), then model/cwd/branch. */}
         <Row label="Title" value={props.title || "—"} strong={!!props.title} />
         <Row label="Profile" value={props.profile ?? "default"}
              strong={!!props.profile && props.profile !== "default"} />
         <Row label="Model" value={info?.model ?? "—"} />
+        <ReasoningRow />
         {info?.cwd ? <Row label="cwd" value={info.cwd} /> : null}
         {branch ? <Row label="Branch" value={rtrunc(branch, INNER - PAD_L - 2)} /> : null}
 

@@ -6,11 +6,12 @@
       "name": "herm-tui",
       "dependencies": {
         "@opentui/core": "0.2.2",
+        "@opentui/core-win32-x64": "0.2.2",
         "@opentui/react": "0.2.2",
         "eikon": "github:liftaris/eikon#03366100df3a91533b4206177a1a524a4463d5c2",
         "gpt-tokenizer": "^3.4.0",
         "open": "^11.0.0",
-        "react": "^19.2.5",
+        "react": "19.2.6",
         "web-tree-sitter": "0.25.10",
         "yaml": "^2.8.4",
       },
@@ -579,7 +580,7 @@
 
     "rc": ["rc@1.2.8", "", { "dependencies": { "deep-extend": "^0.6.0", "ini": "~1.3.0", "minimist": "^1.2.0", "strip-json-comments": "~2.0.1" }, "bin": { "rc": "./cli.js" } }, "sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw=="],
 
-    "react": ["react@19.2.5", "", {}, "sha512-llUJLzz1zTUBrskt2pwZgLq59AemifIftw4aB7JxOqf1HY2FDaGDxgwpAPVzHU1kdWabH7FauP4i1oEeer2WCA=="],
+    "react": ["react@19.2.6", "", {}, "sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q=="],
 
     "react-devtools-core": ["react-devtools-core@7.0.1", "", { "dependencies": { "shell-quote": "^1.6.1", "ws": "^7" } }, "sha512-C3yNvRHaizlpiASzy7b9vbnBGLrhvdhl1CbdU6EnZgxPNbai60szdLtl+VL76UNOt5bOoVTOz5rNWZxgGt+Gsw=="],
 
