@@ -11,6 +11,7 @@ import { ContextGauge } from "./ContextGauge"
 import { CronStatus } from "./CronStatus"
 import { FilterChip } from "../../ui/filter-chip"
 import { OverheadGauge } from "./OverheadGauge"
+import { ProviderRow } from "./ProviderRow"
 import { ReasoningRow } from "./ReasoningRow"
 
 export type SidebarPreview = {
@@ -171,6 +172,7 @@ export const Sidebar = memo((props: {
           <Row label="Profile" value={props.profile ?? "default"}
                strong={!!props.profile && props.profile !== "default"} />
           <Row label="Model" value={info?.model ?? "—"} />
+          <ProviderRow model={info?.model} />
           <ReasoningRow />
           {info?.cwd ? <Row label="cwd" value={info.cwd} /> : null}
           {branch ? <Row label="Branch" value={rtrunc(branch, INNER - PAD_L - 2)} /> : null}
