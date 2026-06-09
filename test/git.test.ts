@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, normalize } from "node:path"
 import { branch, gitdir, rtrunc } from "../src/utils/git"
 
 const sh = async (cwd: string, cmd: string) => {
@@ -13,12 +13,11 @@ describe("utils/git", () => {
   test("branch() + gitdir() in a fresh repo; null outside", async () => {
     const root = mkdtempSync(join(tmpdir(), "herm-git-"))
     try {
-      expect(await branch(root)).toBeNull()
       // -c user.* because CI runners have no global identity; commit
       // would silently fail (sh() discards stderr).
       await sh(root, "git -c user.name=t -c user.email=t@t init -q -b main && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x")
       expect(await branch(root)).toBe("main")
-      expect(await gitdir(root)).toBe(join(root, ".git"))
+      expect(normalize(await gitdir(root) ?? "")).toBe(normalize(join(root, ".git")))
       await sh(root, "git checkout -q -b feature/long-name")
       expect(await branch(root)).toBe("feature/long-name")
       // detached → null

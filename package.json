@@ -1,6 +1,6 @@
 {
   "name": "herm-tui",
-  "version": "1.0.0-dev.1",
+  "version": "1.9.0-dev.11",
   "private": true,
   "description": "A modern TUI for Hermes Agent",
   "type": "module",
@@ -54,3 +54,4 @@
     "typescript": "^5.9.3"
   }
 }
+
