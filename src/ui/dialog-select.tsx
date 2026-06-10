@@ -44,6 +44,12 @@ export const DialogSelect = (props: Props) => {
   const filterable = props.filterable ?? true
   const [filter, setFilter] = useState("")
   const [cursor, setCursor] = useState(0)
+  // Refs keep closures (useKeyboard) from going stale when Enter fires
+  // before React re-renders after a Down arrow state update.
+  const cursorRef = useRef(0)
+  const filteredRef = useRef<SelectOption[]>([])
+  const onSelectRef = useRef(props.onSelect)
+  onSelectRef.current = props.onSelect
   // Suppress synthetic mouse-over after a keyboard nav or filter
   // reflow: when the list shrinks/scrolls under a stationary pointer,
   // OpenTUI fires onMouseOver for whatever row now sits beneath it,
@@ -77,6 +83,9 @@ export const DialogSelect = (props: Props) => {
     )
   }, [filter, props.options])
 
+  // Sync filteredRef on every render
+  filteredRef.current = filtered
+
   // Group by category
   const groups = useMemo(() => {
     const map = new Map<string, SelectOption[]>()
@@ -99,10 +108,11 @@ export const DialogSelect = (props: Props) => {
   }, [filtered.length, cursor])
 
   useEffect(() => {
-    if (!props.current) { setCursor(0); return }
+    if (!props.current) { setCursor(0); cursorRef.current = 0; return }
     const i = filtered.findIndex(o => o.value === props.current)
     const n = Math.max(0, i)
     setCursor(n)
+    cursorRef.current = n
     scrollTo(n)
   }, [props.current, filtered])
 
@@ -116,14 +126,27 @@ export const DialogSelect = (props: Props) => {
 
   const keys = useKeys()
 
+  // setCursor that also updates the ref synchronously — so onActivate
+  // reads the current cursor even if React hasn't re-rendered yet.
+  const setCursorSync = (fn: ((p: number) => number) | number) => {
+    setCursor(p => {
+      const n = typeof fn === "number" ? fn : fn(p)
+      cursorRef.current = n
+      return n
+    })
+  }
+
   useKeyboard((key) => {
     if (!filterable) return
     const consumed = handleListKey(keys, key, {
       count: filtered.length,
-      setSel: (fn) => { mode.current = "kb"; moved.current = true; setCursor(fn) },
+      setSel: (fn) => { mode.current = "kb"; moved.current = true; setCursorSync(fn) },
       scrollTo,
       page: Math.max(1, (sb.current?.viewport.height ?? 10) - 1),
-      onActivate: () => { const item = filtered[cursor]; if (item) props.onSelect(item) },
+      onActivate: () => {
+        const item = filteredRef.current[cursorRef.current]
+        if (item) onSelectRef.current(item)
+      },
     })
     if (consumed) return
     if (props.onKey?.(key)) return
@@ -225,8 +248,8 @@ export const DialogSelect = (props: Props) => {
                 id={rowId(i)}
                 flexDirection="row"
                 backgroundColor={active ? theme.backgroundElement : undefined}
-                onMouseMove={() => { mode.current = "mouse"; moved.current = true; setCursor(c => c === i ? c : i) }}
-                onMouseOver={() => { if (mode.current === "mouse") { moved.current = true; setCursor(i) } }}
+                onMouseMove={() => { mode.current = "mouse"; moved.current = true; setCursorSync(c => c === i ? c : i) }}
+                onMouseOver={() => { if (mode.current === "mouse") { moved.current = true; setCursorSync(() => i) } }}
                 onMouseDown={() => props.onSelect(item)}
                 paddingLeft={1}
                 paddingRight={1}

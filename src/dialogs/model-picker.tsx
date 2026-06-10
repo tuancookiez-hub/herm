@@ -142,29 +142,29 @@ const ModelPickerDialog = (props: Props) => {
   if (!data) return <box width={50} padding={1}><text>Loading models…</text></box>
 
   if (step === "setup" && setupProvider?.key_env) return <SecretPrompt
-    title={`Paste ${setupProvider.key_env}`}
-    label={setupDescription(setupProvider) ?? `API key for ${setupProvider.name}`}
+    title={`Configure ${setupProvider.name}`}
+    label={`${setupProvider.key_env} — paste to activate`}
     onSubmit={(key) => { void submitKey(setupProvider, key) }}
   />
 
   if (step === "provider") {
-    const options: SelectOption[] = (data.providers ?? [])
+    const sorted = (data.providers ?? [])
+      .filter(p => p.authenticated !== false)
       .toSorted((a, b) => Number(Boolean(b.is_current)) - Number(Boolean(a.is_current)))
-      .map(p => ({
-        title: p.name,
-        value: p.slug,
-        description: providerDescription(p),
-        hint: providerHint(p),
-        category: p.is_current ? "Current" : p.authenticated === false ? "Setup required" : "Available",
-      }))
+    const bySlug = new Map(sorted.map(p => [p.slug, p]))
+    const options: SelectOption[] = sorted.map(p => ({
+      title: p.name,
+      value: p.slug,
+      description: providerDescription(p),
+      hint: providerHint(p),
+      category: p.is_current ? "Current" : "Available",
+    }))
     return (
       <DialogSelect
         title={props.title ?? "Switch Provider"}
         options={options}
         current={data.provider}
         onSelect={(o) => {
-          const p = data.providers?.find(pp => pp.slug === o.value)
-          if (p?.authenticated === false || (p && !configured(p))) return void setup(p)
           setProvider(o.value)
           setStep("model")
         }}
