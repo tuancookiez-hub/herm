@@ -57,6 +57,11 @@ interface TuiPreferences {
    *  cursor position or transient toggles. */
   kanban?: KanbanPrefs
   sessions?: SessionsPrefs
+  /** Per-session theme override. `useSessionTheme(sid)` reads this
+   *  for the active session; sessions without an entry fall back to
+   *  the global `theme` (preserves the old behavior for pre-feature
+   *  sessions). */
+  sessionThemes?: Record<string, string>
   /** Client-side confirm_ask approvals suppressed by exact question+subject. */
   neverPrompts?: NeverPrompt[]
   /** Opaque plugin storage. Per-plugin keys are namespaced at the api
@@ -174,6 +179,45 @@ function save(partial?: Partial<TuiPreferences>): void {
 /** Get a single preference value */
 export function get<K extends keyof TuiPreferences>(key: K): TuiPreferences[K] {
   return load()[key]
+}
+
+/** Read the persisted theme for a given session id, if any.
+ *  Sessions without an entry return undefined and the caller should
+ *  fall back to the global `theme` (or DEFAULT_THEME). */
+export function getSessionTheme(sid: string | undefined): string | undefined {
+  if (!sid) return undefined
+  return load().sessionThemes?.[sid]
+}
+
+/** Subscribe to a session-specific theme. This must use the
+ *  sessionThemes[<sid>] value as its snapshot; subscribing through
+ *  usePref("theme") is not enough because changing sessionThemes
+ *  leaves the global theme snapshot unchanged, so React will skip the
+ *  live repaint. */
+export function useSessionTheme(sid: string | undefined): string | undefined {
+  return useSyncExternalStore(subscribe, () => getSessionTheme(sid))
+}
+
+/** Testable low-level subscription for session theme changes. UI code
+ *  should use `useSessionTheme`; tests use this to prove session theme
+ *  writes notify even when the global `theme` value is unchanged. */
+export function subscribeSessionTheme(sid: string, fn: (value: string | undefined) => void): () => void {
+  const l = () => fn(getSessionTheme(sid))
+  return subscribe(l)
+}
+
+/** Set the persisted theme for a given session id. No-op when the
+ *  value is unchanged so redundant writes (e.g. picker preview
+ *  re-firing) don't notify subscribers. The new session theme is
+ *  visible to all `usePref`/`getSessionTheme` callers on the next
+ *  render. */
+export function setSessionTheme(sid: string, name: string): void {
+  if (!sid) return
+  const current = load()
+  const next = { ...(current.sessionThemes ?? {}), [sid]: name }
+  if (current.sessionThemes?.[sid] === name) return
+  save({ sessionThemes: next })
+  for (const l of listeners) l()
 }
 
 /** Set a single preference value and persist. No-op when unchanged so

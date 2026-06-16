@@ -40,6 +40,7 @@ import { Composer, type ComposerHandle } from "./components/chat/Composer"
 import * as preferences from "./context/preferences"
 import { turnReducer, initialTurn, transcriptToMessages } from "./app/turnReducer"
 import { useSession } from "./app/useSession"
+import { setCurrentSessionId } from "./context/sessionId"
 import { SkinProvider, deriveSkin, type SkinState } from "./context/skin"
 import { useAppKeys } from "./app/useAppKeys"
 import { quit } from "./app/exit"
@@ -97,6 +98,10 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
   const [ready, setReady] = useState(false)
   const [sid, setSid] = useState("")
   const sidRef = useRef(sid); sidRef.current = sid
+  // Publish the active session id so providers above AppInner (most
+  // importantly ThemeProvider) can resolve per-session state. Empty
+  // string during splash and between session.close() + session.create().
+  useEffect(() => { setCurrentSessionId(sid) }, [sid])
   const capabilities = sessionCapabilities({ sid, ready, streaming: turn.streaming })
   const [tab, setTab] = useState(CHAT_TAB)
   // Sub-tab per group — Chat has none, so key 0 is unused.

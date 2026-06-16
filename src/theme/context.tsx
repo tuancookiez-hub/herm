@@ -21,6 +21,7 @@ import { DEFAULT_THEME, THEME_NAMES } from "./builtin"
 import { load, get } from "./load"
 import { syntax } from "./syntax"
 import * as preferences from "../context/preferences"
+import { useCurrentSessionId } from "../context/sessionId"
 
 interface ThemeContext {
   /** Resolved theme — all RGBA values ready for JSX props */
@@ -61,9 +62,18 @@ export const ThemeProvider = ({
   // remount. `initial` wins only when no pref is set (tests / fresh
   // install); production passes initial=prefs.theme so they agree at
   // boot and the pref drives thereafter.
+  // Active session id (empty = no session, e.g. during splash). When
+  // set, the active theme prefers the per-session override over the
+  // global pref, so resuming a session restores its last theme.
+  const sid = useCurrentSessionId()
+  // `useSessionTheme(sid)` uses the sessionThemes[<sid>] value as its
+  // snapshot so changing the active session theme repaints live. A
+  // plain usePref("theme") subscription would not repaint because
+  // the global theme value stays unchanged.
   const pref = preferences.usePref("theme")
   const modePref = preferences.usePref("themeMode")
-  const active = pref ?? initial ?? DEFAULT_THEME
+  const sessionTheme = preferences.useSessionTheme(sid)
+  const active = sessionTheme ?? pref ?? initial ?? DEFAULT_THEME
   const mode = modePref === "light" || modePref === "dark" ? modePref : initialMode
   const [tick, force] = useState(0)
 
@@ -97,10 +107,16 @@ export const ThemeProvider = ({
 
   const set = useCallback((name: string) => {
     if (!THEMES_SET.has(name)) return false
-    preferences.set("theme", name)
+    // Per-session persistence: writing to sessionThemes[<sid>] keeps
+    // the theme bound to this session across close+resume, so the
+    // user can visually distinguish terminals at a glance. Falls
+    // back to the global theme when no session is active (e.g. splash
+    // or boot before session.create lands).
+    if (sid) preferences.setSessionTheme(sid, name)
+    else preferences.set("theme", name)
     if (!get(name)) load(name).catch(() => {})
     return true
-  }, [])
+  }, [sid])
 
   const setMode = useCallback((mode: "dark" | "light") => {
     preferences.set("themeMode", mode)
