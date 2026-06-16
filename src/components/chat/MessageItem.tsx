@@ -65,6 +65,9 @@ const BOTTOM_RULE = {
   topT: "", bottomT: "", leftT: "", rightT: "", cross: "",
 }
 
+/** System messages longer than this get collapsed behind a click-to-expand toggle. */
+const SYSTEM_COLLAPSE_CHARS = 400
+
 // OpenTUI has no onClick; synthesize one from down→up at the same cell
 // so text-selection drags don't fire it.
 function useClick(fn?: () => void) {
@@ -99,9 +102,28 @@ export const MessageItem = memo(({ message, streaming, prompt, onRewind, onPick 
 
 const SystemMessage = memo(({ message }: { message: Message }) => {
   const theme = useTheme().theme
+  const text = extract(message)
+  const isLong = text.length > SYSTEM_COLLAPSE_CHARS
+  const [open, setOpen] = useState(false)
+  const click = useClick(isLong ? () => setOpen(v => !v) : undefined)
+  if (!isLong) {
+    return (
+      <box marginBottom={1} minHeight={1}>
+        <text fg={theme.textMuted} wrapMode="word">{text}</text>
+      </box>
+    )
+  }
+  const firstLine = (text.split("\n")[0] ?? "").trim().slice(0, 120) || "(system message)"
   return (
-    <box marginBottom={1} minHeight={1}>
-      <text fg={theme.textMuted} wrapMode="word">{extract(message)}</text>
+    <box marginBottom={1} minHeight={1} {...click}>
+      <text fg={theme.accent}>{open ? "▾" : "▸"}</text>
+      <text fg={theme.textMuted} wrapMode="word">{firstLine}</text>
+      <text fg={theme.textMuted}>{" — "}{text.length.toLocaleString()} chars</text>
+      {open ? (
+        <box marginTop={1}>
+          <text fg={theme.textMuted} wrapMode="word">{text}</text>
+        </box>
+      ) : null}
     </box>
   )
 })

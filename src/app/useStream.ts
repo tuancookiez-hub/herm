@@ -159,10 +159,10 @@ export function useStream(c: Ctx) {
         x.dispatch({ kind: "background", id: tid, title, text })
       },
       onBtw: (text) => {
-        const head = text.split("\n")[0].slice(0, 80)
-        x.dispatch({ kind: "system", text: `◈ btw — ${head}` })
+        x.dispatch({ kind: "system", text: `◈ btw\n\n${text}` })
+        const preview = text.split("\n")[0].slice(0, 160)
         toast.show({
-          variant: "info", title: "btw", message: head, duration: 8000,
+          variant: "info", title: "btw", message: preview, duration: 8000,
           action: { label: "view", run: () => openAlert(dialog, "btw", text) },
         })
       },
