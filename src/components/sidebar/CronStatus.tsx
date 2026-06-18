@@ -33,8 +33,7 @@ const normalize = (r: RawJob): CronJob => ({
   next_run: r.next_run,
 })
 
-export const CronStatus = memo((props: { width: number }) => {
-  const theme = useTheme().theme
+export const useCronJobs = () => {
   const gw = useGateway()
   const [jobs, setJobs] = useState<CronJob[]>([])
   const [err, setErr] = useState<string | null>(null)
@@ -54,6 +53,17 @@ export const CronStatus = memo((props: { width: number }) => {
     return () => clearInterval(id)
   }, [load])
 
+  return { jobs, err }
+}
+
+export const CronStatus = memo((props: {
+  width: number
+  open: boolean
+  onToggle: () => void
+}) => {
+  const theme = useTheme().theme
+  const { jobs, err } = useCronJobs()
+
   if (err) return (
     <box height={1}>
       <text><span fg={theme.error}>Cron: {err}</span></text>
@@ -68,41 +78,36 @@ export const CronStatus = memo((props: { width: number }) => {
 
   const ok = jobs.filter(j => j.last_status === "ok").length
   const failed = jobs.filter(j => j.last_status === "error").length
-  const pending = jobs.length - ok - failed
-
-  const w = props.width
-  const label = `Cron ${jobs.length}`
-  const status = failed > 0
-    ? <span fg={theme.error}>{`${failed} fail`}</span>
-    : ok > 0
-      ? <span fg={theme.success}>{`${ok} ok`}</span>
-      : <span fg={theme.warning}>pending</span>
+  const hint = failed > 0
+    ? `${failed} fail`
+    : ok > 0 ? `${ok} ok` : "pending"
+  const hintColor = failed > 0
+    ? theme.error
+    : ok > 0 ? theme.success : theme.warning
 
   return (
-    <box flexDirection="column" marginBottom={1}>
-      <box height={1}>
+    <box flexDirection="column" marginBottom={props.open ? 1 : 0}>
+      <box height={1}
+           onMouseDown={props.onToggle}>
         <text>
-          <span fg={theme.textMuted}>{label.padEnd(w - 8)}</span>
-          {status}
+          <span fg={theme.text}>{props.open ? "▾ " : "▸ "}</span>
+          <span fg={theme.text}><strong>{"Cron"}</strong></span>
+          <span fg={theme.textMuted}>{`  ${jobs.length}`}</span>
+          <span fg={hintColor}>{`  ${hint}`}</span>
         </text>
       </box>
-      {jobs.slice(0, 3).map(j => (
+      {props.open ? jobs.slice(0, 5).map(j => (
         <box key={j.id} height={1}>
           <text>
             <span fg={theme.textMuted}>{"  "}</span>
             <span fg={j.last_status === "error" ? theme.error : j.last_status === "ok" ? theme.success : theme.textMuted}>
               {j.last_status === "ok" ? "● " : j.last_status === "error" ? "● " : "○ "}
             </span>
-            <span fg={theme.text}>{j.name.slice(0, w - 6)}</span>
-            <span fg={theme.textMuted}>{j.schedule.slice(0, w - j.name.length - 6)}</span>
+            <span fg={theme.text}>{j.name.slice(0, props.width - 6)}</span>
+            <span fg={theme.textMuted}>{j.schedule.slice(0, props.width - j.name.length - 6)}</span>
           </text>
         </box>
-      ))}
-      {jobs.length > 3 ? (
-        <box height={1}>
-          <text><span fg={theme.textMuted}>{`  … and ${jobs.length - 3} more`}</span></text>
-        </box>
-      ) : null}
+      )) : null}
     </box>
   )
 })

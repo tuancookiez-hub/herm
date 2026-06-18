@@ -23,7 +23,7 @@ const detail = (over: Partial<SessionRow> & { id: string; sessionSource: string 
   input_tokens: 0, output_tokens: 0,
   cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
   estimated_cost_usd: null, title: null, lastMessage: null, last_active: null,
-  parent_session_id: null, subagent_count: 0, lineage_root_id: null,
+  parent_session_id: null, cwd: null, subagent_count: 0, lineage_root_id: null,
   ...over,
 })
 

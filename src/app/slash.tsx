@@ -299,6 +299,21 @@ export function useSlash(c: SlashCtx): (cmd: SlashCommand, arg?: string) => void
             })
             .catch((e: Error) => toast.show({ variant: "error", message: e.message }))
           return
+        case "cwd": {
+          const path = arg.trim()
+          if (!path) {
+            x.dispatch({ kind: "system", text: `cwd: ${x.info?.cwd ?? process.cwd()}` })
+            return
+          }
+          gw.request<SessionInfo>("session.cwd.set",
+            { session_id: x.sid, cwd: path })
+            .then(info => {
+              x.setInfo(info)
+              x.dispatch({ kind: "system", text: `cwd → ${info.cwd}` })
+            })
+            .catch((e: Error) => toast.show({ variant: "error", message: e.message }))
+          return
+        }
         case "yolo":
           gw.request<{ value?: string; warning?: string; info?: SessionInfo }>("config.set", { key: "yolo" })
             .then(r => {

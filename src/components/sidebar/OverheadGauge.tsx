@@ -4,59 +4,39 @@ import type { SessionInfo } from "../../context/wire"
 import type { Usage } from "../../types/message"
 import { formatTokens } from "../../utils/tokens"
 
-// Overhead breakdown — stacked bar showing per-turn context cost.
-// Estimates each component from the system prompt content and tool/skill counts.
-// System prompt is a single string; we estimate sub-components by known sizes.
-
 const FILL = "█"
 const EMPTY = "░"
 const CHAR_TO_TOKEN = 0.25
 const TOOL_TOKENS = 125
-const SKILL_TOKENS = 20
-// Known component sizes (chars) from the system prompt assembly.
-// These are stable across sessions — measured once from the actual prompt.
+
 const KNOWN = {
-  agent_guidance: 2000,   // task completion, no-fabrication, hermes-agent pointer
-  tool_guidance:  1200,   // memory, session_search, skills, kanban guidance
-  model_guidance:  500,   // Gemini, GPT/Grok operational guidance
-  env_profile:     800,   // environment hints, probe, profile, platform
-  timestamp:       200,   // date, session ID, model, provider
+  agent_guidance: 2000,
+  tool_guidance: 1200,
+  model_guidance: 500,
+  env_profile: 800,
+  timestamp: 200,
 } as const
 
 const estimate = (info?: SessionInfo | null) => {
-  if (!info) return { identity: 0, context: 0, skills: 0, memory: 0, tools: 0, guidance: 0 }
+  if (!info) return { identity: 0, context: 0, skills: 0, memory: 0, tools: 0, guidance: 0, total: 0 }
 
-  // Identity: SOUL.md (~866 chars) + agent guidance (~2000 chars)
+  const prompt = info.system_prompt ?? ""
+  const promptTokens = Math.round(prompt.length * CHAR_TO_TOKEN)
+
   const identity = Math.round((866 + KNOWN.agent_guidance) * CHAR_TO_TOKEN)
-
-  // Context files: AGENTS.md + .cursorrules + project SOUL.md
-  // Subtract known sizes from total system prompt to estimate context files
-  const totalPrompt = info.system_prompt ? info.system_prompt.length : 0
-  const knownStable = 866 + KNOWN.agent_guidance + KNOWN.tool_guidance + KNOWN.model_guidance + KNOWN.env_profile + KNOWN.timestamp
-  const context = Math.round(Math.max(0, totalPrompt - knownStable) * CHAR_TO_TOKEN)
-
-  // Skills: count from info.skills
+  const guidance = Math.round((KNOWN.tool_guidance + KNOWN.model_guidance + KNOWN.env_profile) * CHAR_TO_TOKEN)
   const sc = Object.values(info.skills ?? {}).reduce((n, v) => n + v.length, 0)
-  const skills = sc * SKILL_TOKENS
-
-  // Memory: MEMORY.md + USER.md + external provider (estimated from prompt)
-  // We can't parse this out of the system prompt, so estimate ~500 tokens if memory is active
+  const skills = sc * 20
   const memory = 500
-
-  // Tool schemas: count from info.tools
   const tc = Object.values(info.tools ?? {}).reduce((n, v) => n + v.length, 0)
   const tools = tc * TOOL_TOKENS
 
-  // Guidance: tool-specific + model-specific + env/profile/platform
-  const guidance = Math.round((KNOWN.tool_guidance + KNOWN.model_guidance + KNOWN.env_profile) * CHAR_TO_TOKEN)
+  const knownPrompt = identity + skills + memory + guidance
+  const context = Math.max(0, promptTokens - knownPrompt)
 
-  return { identity, context, skills, memory, tools, guidance }
-}
+  const total = promptTokens + tools
 
-const pad = (s: string, w: number) => {
-  const p = Math.max(0, w - s.length)
-  const l = Math.ceil(p / 2)
-  return " ".repeat(l) + s + " ".repeat(p - l)
+  return { identity, context, skills, memory, tools, guidance, total }
 }
 
 export const OverheadGauge = memo((props: {
@@ -65,8 +45,7 @@ export const OverheadGauge = memo((props: {
   width: number
 }) => {
   const theme = useTheme().theme
-  const { identity, context, skills, memory, tools, guidance } = estimate(props.info)
-  const total = identity + context + skills + memory + tools + guidance
+  const { identity, context, skills, memory, tools, guidance, total } = estimate(props.info)
   if (total <= 0) return null
 
   const cells = Math.max(8, props.width - 2)
@@ -91,7 +70,7 @@ export const OverheadGauge = memo((props: {
     <box flexDirection="column" marginTop={1}>
       <box height={1}>
         <text>
-          <span fg={theme.textMuted}>{" "}</span>
+          <span fg={theme.textMuted}> </span>
           <span fg={theme.text}>Overhead</span>
           <span fg={theme.textMuted}>{` ${formatTokens(total)} (${pctS}%)`}</span>
         </text>
@@ -103,13 +82,12 @@ export const OverheadGauge = memo((props: {
           <span fg={theme.textMuted}>{EMPTY.repeat(emptyW)}]</span>
         </text>
       </box>
-      {/* Legend — 2 rows of 3 */}
       {[0, 3].map(row => (
         <box key={row} height={1}>
           <text>
             {segs.slice(row, row + 3).map((s, j) => (
               <span key={j}>
-                {j > 0 ? <span fg={theme.textMuted}>{"  "}</span> : null}
+                {j > 0 ? <span fg={theme.textMuted}>  </span> : null}
                 <span fg={s.color}>■</span>
                 <span fg={theme.textMuted}>{` ${s.label} ${formatTokens(s.tok)}`}</span>
               </span>

@@ -120,6 +120,7 @@ export interface SessionRow {
   lastMessage: string | null
   last_active: number | null
   parent_session_id: string | null
+  cwd: string | null
   /** Count of subagent children — see kind() === 'subagent'. */
   subagent_count: number
   /** Original root id when this row was tip-projected from a
@@ -206,6 +207,7 @@ const COLS = `
   s.input_tokens, s.output_tokens,
   s.cache_read_tokens, s.cache_write_tokens, s.reasoning_tokens,
   s.estimated_cost_usd, s.parent_session_id,
+  s.cwd,
   COALESCE(s.title,
     (SELECT SUBSTR(content,1,120) FROM messages
      WHERE session_id = s.id AND role = 'user' ORDER BY id LIMIT 1)) AS title,
@@ -223,6 +225,7 @@ type Raw = {
   input_tokens: number; output_tokens: number
   cache_read_tokens: number; cache_write_tokens: number; reasoning_tokens: number
   estimated_cost_usd: number | null; parent_session_id: string | null
+  cwd: string | null
   title: string | null; lastMessage: string | null
   last_active: number | null; subagent_count: number
 }
@@ -248,6 +251,7 @@ const toRow = (r: Raw, lineage: string | null = null): SessionRow => ({
   lastMessage: r.lastMessage,
   last_active: r.last_active,
   parent_session_id: r.parent_session_id,
+  cwd: r.cwd,
   subagent_count: r.subagent_count,
   lineage_root_id: lineage,
 })

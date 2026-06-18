@@ -264,6 +264,7 @@ const Detail = memo((props: {
             ["ID", r.id],
             ["Source", badge(src(r))],
             ["Model", d?.model ?? "—"],
+            ["CWD", d?.cwd ?? "—"],
             ["Started", when(r.started_at)],
             ["Last active", lastActive ? `${when(lastActive)}  (${ago(lastActive)})` : "—"],
             ["Duration", lastActive ? span(r.started_at, lastActive) : "—"],
@@ -539,7 +540,14 @@ export const Sessions = memo((props: Props) => {
     ((b.live?.last_active ?? b.started_at) - (a.live?.last_active ?? a.started_at))), [liveRows])
   const ids = useMemo(() => new Set(active.flatMap(r =>
     [r.id, r.live?.session_key].filter((x): x is string => Boolean(x)))), [active])
-  const sorted = useMemo(() => rows.filter(r => !ids.has(r.id)).sort(cmp(sort)), [rows, ids, sort])
+  const [filter, setFilter] = useState("")
+  const [filtering, setFiltering] = useState(false)
+  const sorted = useMemo(() => {
+    const s = rows.filter(r => !ids.has(r.id)).sort(cmp(sort))
+    if (!filter.trim()) return s
+    const q = filter.toLowerCase()
+    return s.filter(r => label(r).toLowerCase().includes(q))
+  }, [rows, ids, sort, filter])
   const views = useMemo<View[]>(() => {
     const stats = sorted.reduce((m, r) => {
       const s = src(r)
@@ -899,6 +907,13 @@ export const Sessions = memo((props: Props) => {
       if (key.raw && key.raw.length === 1 && key.raw >= " ") return setQuery(p => p + key.raw)
       return
     }
+    if (filtering) {
+      if (key.name === "escape") { setFiltering(false); setFilter(""); return }
+      if (key.name === "return") { setFiltering(false); return }
+      if (key.name === "backspace") return setFilter(p => p.slice(0, -1))
+      if (key.raw && key.raw.length === 1 && key.raw >= " ") return setFilter(p => p + key.raw)
+      return
+    }
     const matched = handleListKey(keys, key, {
       count, setSel,
       page: Math.max(1, (vscroll.current?.viewport.height ?? 10) - 1),
@@ -910,11 +925,12 @@ export const Sessions = memo((props: Props) => {
         const v = visible[sel]
         if (v && !v.indent && !v.row.live) confirmDelete(v.row)
       },
-      onSearch: () => { setSearching(true); setQuery(""); setResults([]); setSearchSel(0) },
+      onSearch: () => { setFiltering(false); setSearching(true); setQuery(""); setResults([]); setSearchSel(0) },
     })
     if (matched) return
     if (keys.match("sessions.sort", key)) return setSort(sort === "active" ? "started" : "active")
     if (keys.match("sessions.rename", key)) return void rename()
+    if (key.name === "f") { setFiltering(true); return }
     const prev = keys.match("sessions.prev", key)
     const next = keys.match("sessions.next", key)
     if (prev || next) {
@@ -947,7 +963,7 @@ export const Sessions = memo((props: Props) => {
       <TabShell
         title={searching
           ? `Search Results (${results.length})`
-          : `Sessions (${listed.length}${pending ? "…" : ""})`}
+          : `Sessions (${listed.length}${pending ? "…" : ""})${filter ? ` · filtered` : ""}`}
         error={warn || null}
         grow={3}
       >
@@ -957,6 +973,16 @@ export const Sessions = memo((props: Props) => {
               <span fg={theme.accent}>/ </span>
               <span fg={theme.text}>{query}</span>
               <span fg={theme.accent}>█</span>
+            </text>
+          </box>
+        ) : null}
+        {filtering || filter ? (
+          <box height={1} marginBottom={1}>
+            <text>
+              <span fg={theme.primary}>filter: </span>
+              <span fg={theme.text}>{filter}</span>
+              {filtering ? <span fg={theme.primary}>█</span> : null}
+              {!filtering && filter ? <span fg={theme.textMuted}> (f to edit, esc to clear)</span> : null}
             </text>
           </box>
         ) : null}
@@ -1036,6 +1062,7 @@ export const Sessions = memo((props: Props) => {
           ...sub,
           [`${keys.print("list.activate")}/click`, action],
           [keys.print("list.search"), "search"],
+          ["f", "filter"],
           [keys.print("sessions.sort"), `sort: ${sort}`],
           [keys.print("sessions.rename"), "rename"],
           [keys.print("list.delete"), "delete"],

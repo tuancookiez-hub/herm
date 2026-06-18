@@ -117,6 +117,8 @@ export const Sidebar = memo((props: {
   const info = props.info
 
   const [mcpOpen, setMcpOpen] = useState(false)
+  const [cronOpen, setCronOpen] = useState(false)
+  const [cwdExpanded, setCwdExpanded] = useState(false)
 
   const cwd = info?.cwd ?? process.cwd()
   const branch = useGitBranch(cwd)
@@ -147,7 +149,16 @@ export const Sidebar = memo((props: {
         <Row label="Model" value={info?.model ?? "—"} />
         <ProviderRow model={info?.model} />
         <ReasoningRow />
-        {info?.cwd ? <Row label="cwd" value={info.cwd} /> : null}
+        {info?.cwd ? (
+          <box height={1} onMouseDown={() => setCwdExpanded(e => !e)}>
+            <text>
+              <span fg={theme.textMuted}>{`  ${"cwd".padEnd(PAD_L)}`}</span>
+              <span fg={theme.text}>{cwdExpanded
+                ? info.cwd
+                : rtrunc(info.cwd, INNER - PAD_L - 2)}</span>
+            </text>
+          </box>
+        ) : null}
         {branch ? <Row label="Branch" value={rtrunc(branch, INNER - PAD_L - 2)} /> : null}
 
         {(info?.mcp_servers?.length ?? 0) > 0 ? (() => {
@@ -175,7 +186,7 @@ export const Sidebar = memo((props: {
         })() : null}
 
         <box flexGrow={1} />
-        <CronStatus width={INNER} />
+        <CronStatus width={INNER} open={cronOpen} onToggle={() => setCronOpen(o => !o)} />
         <OverheadGauge info={info} usage={props.usage} width={INNER} />
         <ContextGauge info={info} usage={props.usage} width={INNER} />
       </box>

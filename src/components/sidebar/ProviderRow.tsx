@@ -3,11 +3,6 @@ import { useHome } from "../../home"
 import { useTheme } from "../../theme"
 import { hermesPath } from "../../service/hermes-home"
 
-// Map known model-name prefixes to their owning provider. Pure fallback
-// for when the catalog lookup below can't resolve (missing file, model
-// not in catalog, or catalog read failed) and the SessionInfo wire
-// doesn't carry a provider field — which is the current state, see
-// src/context/wire.ts SessionInfo.
 const PREFIX = [
   [/^minimax[-/]/, "MiniMax"],
   [/^gpt[- ]/, "OpenAI"],
@@ -20,6 +15,9 @@ const PREFIX = [
   [/^deepseek[-/]/, "DeepSeek"],
   [/^qwen[-/]/, "Alibaba"],
   [/^command[-/]/, "Cohere"],
+  [/^zai-org\//, "ZhipuAI"],
+  [/^z-ai\//, "ZhipuAI"],
+  [/^glm[-/]/i, "ZhipuAI"],
 ] as const
 
 const infer = (model: string): string | undefined => {
@@ -28,13 +26,57 @@ const infer = (model: string): string | undefined => {
   return undefined
 }
 
-// `models_dev_cache.json` is the gateway's canonical provider catalog.
-// It lives at $HERMES_HOME/models_dev_cache.json and lists every
-// provider (slug, name, models[]). Reading it once and caching the
-// parsed object at module scope keeps the 1.8MB file from being
-// re-parsed on every sidebar render. The catalog is a snapshot of
-// models.dev data — it doesn't change mid-session, so a one-time read
-// is safe; future improvements could subscribe to a file watcher.
+const DOMAIN: ReadonlyArray<readonly [string, string]> = [
+  ["router.huggingface.co", "HuggingFace"],
+  ["api.openai.com", "OpenAI"],
+  ["api.anthropic.com", "Anthropic"],
+  ["api.x.ai", "xAI"],
+  ["generativelanguage.googleapis.com", "Google"],
+  ["api.mistral.ai", "Mistral"],
+  ["api.deepseek.com", "DeepSeek"],
+  ["api.together.xyz", "Together"],
+  ["openrouter.ai", "OpenRouter"],
+  ["api.groq.com", "Groq"],
+  ["api.fireworks.ai", "Fireworks"],
+  ["api.novita.ai", "Novita"],
+  ["api.siliconflow.cn", "SiliconFlow"],
+  ["api.moonshot.cn", "Moonshot"],
+  ["api.minimax.chat", "MiniMax"],
+  ["dashscope.aliyuncs.com", "Alibaba"],
+  ["api.cerebras.ai", "Cerebras"],
+  ["api.perplexity.ai", "Perplexity"],
+  ["api.cohere.ai", "Cohere"],
+  ["codestral.mistral.ai", "Mistral"],
+]
+
+const fromUrl = (url: string): string | undefined => {
+  try {
+    const host = new URL(url).hostname
+    for (const [d, name] of DOMAIN) if (host === d) return name
+    const parts = host.split(".")
+    return parts[parts.length - 2]?.replace(/^\w/, c => c.toUpperCase())
+  } catch { return undefined }
+}
+
+const SLUG = new Map([
+  ["openai", "OpenAI"], ["anthropic", "Anthropic"], ["xai", "xAI"],
+  ["google", "Google"], ["mistral", "Mistral"], ["deepseek", "DeepSeek"],
+  ["together", "Together"], ["openrouter", "OpenRouter"], ["groq", "Groq"],
+  ["fireworks", "Fireworks"], ["novita", "Novita"], ["siliconflow", "SiliconFlow"],
+  ["nous", "Nous"], ["moonshot", "Moonshot"], ["minimax", "MiniMax"],
+  ["alibaba", "Alibaba"], ["cerebras", "Cerebras"], ["perplexity", "Perplexity"],
+  ["cohere", "Cohere"], ["huggingface", "HuggingFace"],
+])
+
+const fromConfig = (
+  provider: string | undefined,
+  baseUrl: string | undefined,
+): string | undefined => {
+  if (!provider || provider === "auto") return undefined
+  if (provider === "custom") return baseUrl ? fromUrl(baseUrl) : undefined
+  return SLUG.get(provider) ?? provider.charAt(0).toUpperCase() + provider.slice(1)
+}
+
 type Catalog = Record<string, { name?: string; models?: Record<string, unknown> }> | null
 let catalogPromise: Promise<Catalog> | null = null
 const loadCatalog = (): Promise<Catalog> => {
@@ -81,20 +123,18 @@ export const ProviderRow = memo((props: { model?: string | null }) => {
 
   if (!model) return null
 
-  // Config-driven fallback: HermesConfig.providers[].models[] (rare —
-  // only present if the user explicitly configures a custom provider
-  // in config.yaml). Mostly a no-op on this host because config.yaml
-  // has no providers section.
-  const providers = (config as { providers?: Array<{ slug?: string; name?: string; models?: string[] }> } | null)?.providers
-  const configHit = providers?.find(p => (p.models ?? []).some(m => m === model))
-  const value = resolved ?? configHit?.name ?? configHit?.slug ?? infer(model) ?? "—"
+  const cfg = config?.model
+  const primary = model === cfg?.default
+    ? fromConfig(cfg?.provider, cfg?.base_url)
+    : undefined
+  const value = primary ?? resolved ?? infer(model) ?? "—"
   const truncated = value.length <= INNER - PAD_L - 2 ? value : value.slice(0, INNER - PAD_L - 3) + "…"
 
   return (
     <box height={1}>
       <text>
         <span fg={theme.textMuted}>{`  ${"Provider".padEnd(PAD_L)}`}</span>
-        <span fg={theme.textMuted}>{truncated}</span>
+        <span fg={theme.text}>{truncated}</span>
       </text>
     </box>
   )

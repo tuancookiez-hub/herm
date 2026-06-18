@@ -39,7 +39,7 @@ export const LOCAL_NAMES = new Set([
   // parity: session-mutating commands the slash-worker can't service
   "resume", "branch", "compress", "undo", "redo", "retry", "model", "yolo", "quit",
   "copy", "paste", "image", "background", "voice", "mouse", "redraw", "queue",
-  "stash",
+  "stash", "cwd",
   // Ink-only UI toggles — local no-op with a note
   "compact", "setup",
   // browser: use browser.manage RPC, not slash.exec (issue #82)
@@ -79,6 +79,7 @@ export const LOCAL_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: "stash",  description: "Park the prompt (pop/list to restore)", category: "Client",  aliases: [], argsHint: "[pop|list]", subcommands: ["pop", "list"], source: "local", target: "local" },
   { name: "redo",   description: "Re-send the last undone message",       category: "Session", aliases: [], argsHint: "", subcommands: [], source: "local", target: "local" },
   { name: "branch", description: "Fork current conversation",              category: "Session", aliases: ["fork"], argsHint: "[name]", subcommands: [], source: "local", target: "local" },
+  { name: "cwd",    description: "Change session working directory",        category: "Session", aliases: ["cd"], argsHint: "[path]", subcommands: [], source: "local", target: "local" },
   { name: "browser", description: "Connect/disconnect a CDP browser",      category: "Session", aliases: [], argsHint: "[connect|disconnect|status] [url]", subcommands: ["connect", "disconnect", "status"], source: "local", target: "local" },
 ]
 
