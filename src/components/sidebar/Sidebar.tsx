@@ -6,6 +6,7 @@ import type { AvatarState } from "../avatar/states"
 import type { SessionInfo } from "../../context/wire"
 import type { Usage } from "../../types/message"
 import { useGitBranch, rtrunc } from "../../utils/git"
+import { useProcessCwd } from "../../utils/cwd"
 import { Tail } from "../chat/ThoughtCloud"
 import { ContextGauge } from "./ContextGauge"
 import { CronStatus } from "./CronStatus"
@@ -120,8 +121,8 @@ export const Sidebar = memo((props: {
   const [cronOpen, setCronOpen] = useState(false)
   const [cwdExpanded, setCwdExpanded] = useState(false)
 
-  const cwd = info?.cwd ?? process.cwd()
-  const branch = useGitBranch(cwd)
+  const cwd = useProcessCwd(info?.session_id)
+    const branch = useGitBranch(cwd)
 
   return (
     <box width={WIDTH} flexDirection="column">
@@ -149,16 +150,14 @@ export const Sidebar = memo((props: {
         <Row label="Model" value={info?.model ?? "—"} />
         <ProviderRow model={info?.model} />
         <ReasoningRow />
-        {info?.cwd ? (
-          <box height={1} onMouseDown={() => setCwdExpanded(e => !e)}>
-            <text>
-              <span fg={theme.textMuted}>{`  ${"cwd".padEnd(PAD_L)}`}</span>
-              <span fg={theme.text}>{cwdExpanded
-                ? info.cwd
-                : rtrunc(info.cwd, INNER - PAD_L - 2)}</span>
-            </text>
-          </box>
-        ) : null}
+        <box height={1} onMouseDown={() => setCwdExpanded(e => !e)}>
+                  <text>
+                    <span fg={theme.textMuted}>{`  ${"cwd".padEnd(PAD_L)}`}</span>
+                    <span fg={theme.text}>{cwdExpanded
+                      ? cwd
+                      : rtrunc(cwd, INNER - PAD_L - 2)}</span>
+                  </text>
+                </box>
         {branch ? <Row label="Branch" value={rtrunc(branch, INNER - PAD_L - 2)} /> : null}
 
         {(info?.mcp_servers?.length ?? 0) > 0 ? (() => {

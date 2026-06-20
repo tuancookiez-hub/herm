@@ -9,34 +9,68 @@ const EMPTY = "░"
 const CHAR_TO_TOKEN = 0.25
 const TOOL_TOKENS = 125
 
-const KNOWN = {
-  agent_guidance: 2000,
-  tool_guidance: 1200,
-  model_guidance: 500,
-  env_profile: 800,
-  timestamp: 200,
-} as const
+/** Parse the real system prompt into sections by marker strings.
+ *  Each section is [start_marker, end_marker) — the text between them
+ *  is measured for token estimation. Returns chars per section. */
+const parse = (prompt: string) => {
+  const idx = (m: string) => prompt.indexOf(m)
+  const slice = (a: number, b: number) => Math.max(0, b - a)
+
+  // Identity: "# Hermes Agent Persona" → start of skills or tool-use
+  const idStart = idx("# Hermes Agent Persona")
+  const idEnd = idx("<available_skills>")
+  const identity = slice(idStart < 0 ? 0 : idStart, idEnd < 0 ? prompt.length : idEnd)
+
+  // Skills: <available_skills> → </available_skills>
+  const skStart = idx("<available_skills>")
+  const skEnd = idx("</available_skills>")
+  const skills = slice(skStart < 0 ? 0 : skStart, skEnd < 0 ? (skStart < 0 ? 0 : prompt.length) : skEnd)
+
+  // Memory: "MEMORY (your personal notes)" → "USER PROFILE" or next §
+  const memStart = idx("MEMORY (your personal notes)")
+  const memEnd = idx("USER PROFILE")
+  const memory = slice(memStart < 0 ? 0 : memStart, memEnd < 0 ? (memStart < 0 ? 0 : prompt.length) : memEnd)
+
+  // Guidance: "# Finishing the job" through "# Nous Subscription" + "# Tool-use enforcement"
+  // These are scattered, so measure by known markers
+  const guideMarkers = ["# Finishing the job", "# Nous Subscription", "# Tool-use enforcement", "## Skills (mandatory)"]
+  let guidance = 0
+  for (const m of guideMarkers) {
+    const s = idx(m)
+    if (s < 0) continue
+    // Find next # heading at column 0
+    const after = prompt.slice(s + m.length)
+    const nextHeading = after.search(/\n#[^#]/)
+    const end = nextHeading < 0 ? prompt.length : s + m.length + nextHeading
+    guidance += slice(s, end)
+  }
+
+  // Context: everything else (AGENTS.md, project files, environment)
+  const known = identity + skills + memory + guidance
+  const total = prompt.length
+  const context = Math.max(0, total - known)
+
+  return {
+    identity: Math.round(identity * CHAR_TO_TOKEN),
+    skills: Math.round(skills * CHAR_TO_TOKEN),
+    memory: Math.round(memory * CHAR_TO_TOKEN),
+    guidance: Math.round(guidance * CHAR_TO_TOKEN),
+    context: Math.round(context * CHAR_TO_TOKEN),
+  }
+}
 
 const estimate = (info?: SessionInfo | null) => {
   if (!info) return { identity: 0, context: 0, skills: 0, memory: 0, tools: 0, guidance: 0, total: 0 }
 
   const prompt = info.system_prompt ?? ""
   const promptTokens = Math.round(prompt.length * CHAR_TO_TOKEN)
+  const parts = parse(prompt)
 
-  const identity = Math.round((866 + KNOWN.agent_guidance) * CHAR_TO_TOKEN)
-  const guidance = Math.round((KNOWN.tool_guidance + KNOWN.model_guidance + KNOWN.env_profile) * CHAR_TO_TOKEN)
-  const sc = Object.values(info.skills ?? {}).reduce((n, v) => n + v.length, 0)
-  const skills = sc * 20
-  const memory = 500
   const tc = Object.values(info.tools ?? {}).reduce((n, v) => n + v.length, 0)
   const tools = tc * TOOL_TOKENS
-
-  const knownPrompt = identity + skills + memory + guidance
-  const context = Math.max(0, promptTokens - knownPrompt)
-
   const total = promptTokens + tools
 
-  return { identity, context, skills, memory, tools, guidance, total }
+  return { ...parts, tools, total }
 }
 
 export const OverheadGauge = memo((props: {

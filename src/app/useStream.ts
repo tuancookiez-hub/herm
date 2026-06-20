@@ -18,6 +18,7 @@ import type { useSession } from "./useSession"
 import type { GatewayEvent, SessionInfo } from "../context/wire"
 import type { Usage } from "../types/message"
 import type { Launch } from "./launch"
+import { syncProcessCwd } from "../utils/cwd"
 
 type Ctx = {
   dispatch: React.Dispatch<Action>
@@ -131,7 +132,8 @@ export function useStream(c: Ctx) {
         })
       },
       onSessionInfo: (si) => {
-        x.setInfo(si)
+              syncProcessCwd(si.cwd)
+              x.setInfo(si)
         x.setReady(true)
         if (si.session_id) x.setSid(si.session_id)
         x.settle()

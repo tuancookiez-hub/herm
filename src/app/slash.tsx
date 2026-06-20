@@ -40,6 +40,7 @@ import { TAB_SLASH } from "./tabs"
 import { transcriptToMessages, type Action, type TurnState } from "./turnReducer"
 import type { SlashCommand } from "./slashCommands"
 import type { ComposerHandle } from "../components/chat/Composer"
+import { syncProcessCwd } from "../utils/cwd"
 import type { SessionInfo, TranscriptMessage, ImageAttachResponse } from "../context/wire"
 import type { Message, Usage } from "../types/message"
 import { text as msgText } from "../types/message"
@@ -306,12 +307,13 @@ export function useSlash(c: SlashCtx): (cmd: SlashCommand, arg?: string) => void
             return
           }
           gw.request<SessionInfo>("session.cwd.set",
-            { session_id: x.sid, cwd: path })
-            .then(info => {
-              x.setInfo(info)
-              x.dispatch({ kind: "system", text: `cwd → ${info.cwd}` })
-            })
-            .catch((e: Error) => toast.show({ variant: "error", message: e.message }))
+                      { session_id: x.sid, cwd: path })
+                      .then(info => {
+                        syncProcessCwd(info.cwd)
+                        x.setInfo(info)
+                        x.dispatch({ kind: "system", text: `cwd → ${info.cwd}` })
+                      })
+                      .catch((e: Error) => toast.show({ variant: "error", message: e.message }))
           return
         }
         case "yolo":
