@@ -120,34 +120,37 @@ export const ThoughtCloud = memo((props: {
   }, [want, resize])
 
   // Drag-resize via the bottom edge. MouseEvent.y is absolute terminal
-  // row; delta from the drag origin maps 1:1 to height rows.
-  const drag = useRef<{ y: number; h: number } | null>(null)
-  const grab = (e: MouseEvent) => {
-    drag.current = { y: e.y, h: props.height }
-    manual.current = true
-    e.stopPropagation()
-  }
-  const move = (e: MouseEvent) => {
-    const d = drag.current
-    if (!d) return
-    resize(Math.min(CLOUD_MAX, Math.max(CLOUD_MIN, d.h + (e.y - d.y))))
-  }
-  const drop = () => { drag.current = null }
+    // row; delta from the drag origin maps 1:1 to height rows. LEFT button
+    // only — right-click on the cloud should pass through to the message
+    // below so Message Actions (fork / Schrödinger's Box) can fire.
+    const drag = useRef<{ y: number; h: number } | null>(null)
+    const grab = (e: MouseEvent) => {
+      if (e.button !== 0) return
+      drag.current = { y: e.y, h: props.height }
+      manual.current = true
+      e.stopPropagation()
+    }
+    const move = (e: MouseEvent) => {
+      const d = drag.current
+      if (!d) return
+      resize(Math.min(CLOUD_MAX, Math.max(CLOUD_MIN, d.h + (e.y - d.y))))
+    }
+    const drop = () => { drag.current = null }
 
-  const pill = (id: Pane, label: string, n: number | null) => {
-    const on = pane === id
-    return (
-      <box height={1} marginRight={2}
-           onMouseDown={(e: MouseEvent) => { e.stopPropagation(); setPane(id) }}>
-        <text>
-          <span fg={on ? theme.accent : theme.textMuted}>
-            {on ? <strong>{label}</strong> : label}
-          </span>
-          {n !== null && n > 0 ? <span fg={theme.textMuted}>{` ${n}`}</span> : null}
-        </text>
-      </box>
-    )
-  }
+    const pill = (id: Pane, label: string, n: number | null) => {
+      const on = pane === id
+      return (
+        <box height={1} marginRight={2}
+             onMouseDown={(e: MouseEvent) => { if (e.button !== 0) return; e.stopPropagation(); setPane(id) }}>
+          <text>
+            <span fg={on ? theme.accent : theme.textMuted}>
+              {on ? <strong>{label}</strong> : label}
+            </span>
+            {n !== null && n > 0 ? <span fg={theme.textMuted}>{` ${n}`}</span> : null}
+          </text>
+        </box>
+      )
+    }
 
   return (
     <box
@@ -163,10 +166,10 @@ export const ThoughtCloud = memo((props: {
           <box marginRight={1}><text fg={theme.textMuted}>⟨{detail}⟩</text></box>
         ) : null}
         {props.onClose ? (
-          <box width={1} onMouseDown={props.onClose}>
-            <text fg={theme.textMuted}>×</text>
-          </box>
-        ) : null}
+                  <box width={1} onMouseDown={(e: MouseEvent) => { if (e.button !== 0) return; props.onClose?.() }}>
+                    <text fg={theme.textMuted}>×</text>
+                  </box>
+                ) : null}
       </box>
       <scrollbox scrollY stickyScroll stickyStart="bottom" flexGrow={1}>
         <box flexDirection="column" width="100%">

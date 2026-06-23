@@ -69,15 +69,19 @@ const BOTTOM_RULE = {
 const SYSTEM_COLLAPSE_CHARS = 400
 
 // OpenTUI has no onClick; synthesize one from down→up at the same cell
-// so text-selection drags don't fire it.
-function useClick(fn?: () => void) {
-  const at = useRef<{ x: number; y: number } | null>(null)
+// so text-selection drags don't fire it. `button` defaults to 0 (LEFT);
+// pass 2 for RIGHT, 1 for MIDDLE.
+function useClick(fn?: () => void, button: number = 0) {
+  const at = useRef<{ x: number; y: number; button: number } | null>(null)
   return {
-    onMouseDown: (e: MouseEvent) => { at.current = { x: e.x, y: e.y } },
+    onMouseDown: (e: MouseEvent) => {
+      if (e.button !== button) { at.current = null; return }
+      at.current = { x: e.x, y: e.y, button: e.button }
+    },
     onMouseUp: (e: MouseEvent) => {
       const a = at.current
       at.current = null
-      if (fn && a && a.x === e.x && a.y === e.y) fn()
+      if (fn && a && a.x === e.x && a.y === e.y && a.button === e.button) fn()
     },
   }
 }
@@ -132,7 +136,7 @@ const UserMessage = memo(({ message, onRewind }: { message: Message; onRewind?: 
   const ctx = useTheme()
   const theme = ctx.theme
   const [hover, setHover] = useState(false)
-  const click = useClick(onRewind && (() => onRewind(message)))
+  const click = useClick(onRewind && (() => onRewind(message)), 2)
   const fill = useMemo(
     () => ctx.mode === "dark" ? mix(theme.background, theme.backgroundElement) : darken(theme.backgroundElement),
     [ctx.mode, theme.background, theme.backgroundElement],
@@ -190,7 +194,16 @@ const AssistantMessage = memo(({ message, streaming, prompt, onPick }: {
   const theme = ctx.theme
   const { agentName } = useSkin()
   const [hover, setHover] = useState(false)
-  const click = useClick(onPick && (() => onPick(message)))
+    // RIGHT click opens Message Actions / Schrödinger's Box fork. The
+    // user message bubble uses the same right-click for the same modal,
+    // so both rows behave consistently. LEFT click is reserved for
+    // text selection (most TUIs map left-click to mouse reporting and
+    // the right-click is the more reliable non-selection click).
+    // (Note: some terminals — Windows Terminal defaults, plain
+    //  cmd.exe — don't emit SGR right-click events at all. If your
+    //  terminal falls into that bucket, you can change the `2` below
+    //  back to `0` to restore the old LEFT-click behavior.)
+    const click = useClick(onPick && (() => onPick(message)), 2)
   const rail = useMemo(
     () => ctx.mode === "dark" ? lighten(theme.background) : darken(theme.backgroundElement),
     [ctx.mode, theme.background, theme.backgroundElement],
@@ -261,10 +274,10 @@ const AssistantMessage = memo(({ message, streaming, prompt, onPick }: {
   }
 
   return (
-    <box flexDirection="row" marginBottom={1}
-         onMouseOver={() => setHover(true)}
-         onMouseOut={() => setHover(false)}
-         {...click}>
+      <box flexDirection="row" marginBottom={1}
+           onMouseOver={() => setHover(true)}
+           onMouseOut={() => setHover(false)}
+           {...click}>
       <box flexDirection="column" flexGrow={1} flexShrink={1}>
         <box height={1} flexDirection="row">
           <box flexGrow={1}><text fg={theme.textMuted}>{header}</text></box>

@@ -118,10 +118,10 @@ export function useStream(c: Ctx) {
     // interrupt guard catches it. Drain those (and any ghost stream
     // events from the clear_interrupt race) until the next user send.
     if (interrupted.current) {
-      if (STREAM_EVENTS.has(ev.type)) return
-      if (ev.type === "status.update" && ev.payload?.kind === "lifecycle") return
-    }
-    const action = mapEvent(ev, {
+          if (STREAM_EVENTS.has(ev.type)) return
+          if (ev.type === "status.update" && ev.payload?.kind === "lifecycle") return
+        }
+        const action = mapEvent(ev, {
       onReady: () => {
         x.session.boot(x.launchRef.current).then((r) => {
           x.setSid(r.id)
@@ -132,10 +132,13 @@ export function useStream(c: Ctx) {
         })
       },
       onSessionInfo: (si) => {
-              syncProcessCwd(si.cwd)
-              x.setInfo(si)
+        syncProcessCwd(si.cwd)
+        x.setInfo(si)
         x.setReady(true)
-        if (si.session_id) x.setSid(si.session_id)
+        // Don't overwrite sid with si.session_id — that's the DB key,
+        // not the live short id that prompt.submit / session.history
+        // need. The live id is already correct from session.create /
+        // session.activate.
         x.settle()
         const bad = (si.mcp_servers ?? []).filter(s => !s.connected)
         if (bad.length) x.dispatch({

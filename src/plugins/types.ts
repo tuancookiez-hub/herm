@@ -39,7 +39,7 @@ export type RouteDef = {
   /** Stable name — also the `/name` slash target and TabBar label. */
   name: string
   description?: string
-  render: () => ReactNode
+  render: (ctx?: { sessionId?: string; liveSessionId?: string }) => ReactNode
 }
 
 export type Dispose = () => void | Promise<void>

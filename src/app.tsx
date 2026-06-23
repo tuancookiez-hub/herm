@@ -25,6 +25,8 @@ import { Splash } from "./ui/Splash"
 import { lastReal } from "./service/sessions-db"
 import { readChangelog } from "./service/hermes-home"
 import { openMessage } from "./dialogs/message"
+import { openModelPicker } from "./dialogs/model-picker"
+import { resolveSchrodingerRoot, schrodingerDirFor } from "./utils/schrodinger-root"
 import { openTextPrompt } from "./dialogs/text-prompt"
 import { parseEikonFile, type ParsedEikon } from "./components/avatar/eikon"
 import { bundledEikonPath } from "./components/avatar/bundled"
@@ -552,10 +554,120 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
     toast.show({ variant: "success", message: `forked → ${res.title ?? res.session_id}` })
   }, [gw, toast, activateSession])
 
-  const msgMenu = useCallback((m: Message) => {
+  // Listen for the Schrödinger's Box plugin's "please activate this
+  // session" signal. The plugin writes the chosen session id into
+  // active.json.activate_session_id; we poll that file every 800ms
+  // and call activateSession, then clear the field. This is the
+  // no-new-RPC merge path: the plugin never touches the gateway.
+  useEffect(() => {
+    const tick = setInterval(async () => {
+      try {
+        const root = (typeof process !== "undefined" && process.env?.SCHRODINGER_PROJECT_ROOT)
+          || (typeof process !== "undefined" && process.env?.MULTIVERSE_PROJECT_ROOT)
+          || (typeof process !== "undefined" && process.cwd?.())
+          || ""
+        if (!root) return
+        const fs = await import("fs")
+        const path = await import("path")
+        const activePath = path.join(root, schrodingerDirFor(root), "active.json")
+        if (!fs.existsSync(activePath)) return
+        const aj = JSON.parse(fs.readFileSync(activePath, "utf-8") || "null")
+        if (!aj || aj.activate_session_id == null) return
+        const target = String(aj.activate_session_id)
+        delete aj.activate_session_id
+        fs.writeFileSync(activePath, JSON.stringify(aj, null, 2), "utf-8")
+        if (target === sidRef.current) return
+        toast.show({ variant: "info", message: `Activating session ${target.slice(0, 8)}…` })
+        await activateSession(target)
+        toast.show({ variant: "success", message: `Session activated` })
+      } catch (e) {
+        toast.show({ variant: "error", message: `Activation failed: ${(e as Error).message}` })
+      }
+    }, 800)
+    return () => clearInterval(tick)
+  }, [activateSession, toast])
+
+  // Fork into Schrödinger's Box: branch the current session into two
+  // separate sessions, both inheriting the full chat history. The tab
+  // shows their diverging replies in parallel; picking one activates
+  // that branch as the new active session.
+  const forkSchrodinger = useCallback(async (m: Message) => {
     if (turnRef.current.streaming) return
-    openMessage(dialog, m, { rewind, fork, toast })
-  }, [dialog, rewind, fork, toast])
+    const promptText = m.parts.filter(p => p.type === "text").map(p => p.content).join("")
+    const originalSid = sidRef.current  // captured pre-branch — the "real" timeline
+
+    // 1) Branch the session TWICE sequentially (not parallel) so each
+    //    gets a distinct title — parallel branches race on the title
+    //    generator and the second one fails. Names include the groupId
+    //    so re-forking after a previous run doesn't collide.
+    type BranchResult = { session_id: string; db_session_id?: string; title?: string; parent?: string }
+    const groupId = (crypto as { randomUUID?: () => string }).randomUUID?.().replace(/-/g, "").slice(0, 12)
+      || Math.random().toString(36).slice(2, 14)
+    const branchA: BranchResult | null = await gw.request<BranchResult>("session.branch", { name: `Schrödinger's Box ${groupId} · PATH A` })
+      .catch((e: Error) => { toast.show({ variant: "error", message: `Branch A failed: ${e.message}` }); return null })
+    const branchB: BranchResult | null = await gw.request<BranchResult>("session.branch", { name: `Schrödinger's Box ${groupId} · PATH B` })
+      .catch((e: Error) => { toast.show({ variant: "error", message: `Branch B failed: ${e.message}` }); return null })
+    if (!branchA?.session_id || !branchB?.session_id) return
+
+    // 2) The user stays in the original session. The branched sessions
+    //    exist as orphans. The tab will call prompt.submit to them
+    //    once the user picks models.
+
+    // 3) Write manifest + active.json so the tab can find them.
+    //    The on-disk dir is `.schrodinger/`. For backward
+    //    compatibility with old forks, schrodingerDirFor() falls
+    //    back to `.multiverse/` if `.schrodinger/` is missing.
+    const root = resolveSchrodingerRoot()
+    if (!root) {
+      toast.show({ variant: "error", message: "Could not find .schrodinger/ — cd to project root or set SCHRODINGER_PROJECT_ROOT" })
+      return
+    }
+
+    const groupDir = `${root}/${schrodingerDirFor(root)}/groups/${groupId}`
+    const activePath = `${root}/${schrodingerDirFor(root)}/active.json`
+    const manifestPath = `${groupDir}/manifest.json`
+
+    void (async () => {
+      await Bun.write(manifestPath, JSON.stringify({
+        id: groupId,
+        // session.branch returns both the short live session_id and the
+        // persisted DB parent key. Merge must target the DB key, not the
+        // short live id, or state.db lookup fails.
+        parent_session_id: branchA!.parent || originalSid,
+        owner_session_id: branchA!.parent || info?.session_id || originalSid,
+        owner_live_session_id: originalSid,
+        owner_process_pid: process.pid,
+        created_at: new Date().toISOString(),
+        phase: "configure",
+        status: "pending",
+        lanes: [
+          { id: "lane-0", label: "PATH A", session_id: branchA!.session_id, db_session_id: branchA!.db_session_id, session_title: branchA!.title || `Schrödinger's Box ${groupId} · PATH A`, provider: "", model: "", prompt: "", default_prompt: promptText, status: "ready" },
+          { id: "lane-1", label: "PATH B", session_id: branchB!.session_id, db_session_id: branchB!.db_session_id, session_title: branchB!.title || `Schrödinger's Box ${groupId} · PATH B`, provider: "", model: "", prompt: "", default_prompt: promptText, status: "ready" },
+        ],
+      }, null, 2))
+      await Bun.write(activePath, JSON.stringify({
+        group_id: groupId,
+        phase: "configure",
+        user_prompt: promptText,
+        project_root: root,
+        parent_session_id: branchA!.parent || originalSid,
+        owner_session_id: branchA!.parent || info?.session_id || originalSid,
+        owner_live_session_id: originalSid,
+        owner_process_pid: process.pid,
+        open_tab: true,
+        branch_a: branchA!.db_session_id || branchA!.session_id,
+        branch_b: branchB!.db_session_id || branchB!.session_id,
+      }, null, 2))
+    })()
+
+    toast.show({ title: "Schrödinger's Box", message: `Pick 2 models in the new tab · ${groupId}`, variant: "info" })
+  }, [gw, toast, info])
+
+  const msgMenu = useCallback((m?: Message) => {
+    if (!m) return
+    if (turnRef.current.streaming) return
+    openMessage(dialog, m, { rewind, fork, forkSchrodinger, toast })
+  }, [dialog, rewind, fork, forkSchrodinger, toast])
   // Gateway owns the canonical list (session["attached_images"]); chips
   // are a client-side mirror. prompt.submit drains server-side, so clear
   // here too. No image.detach RPC yet — chips are display-only.
@@ -819,7 +931,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
         case CHAT_TAB: return <Chat messages={turn.messages} streaming={turn.streaming}
                                prompt={promptWire}
                                cloud={cloud} cloudH={cloudH} pick={pick}
-                               onResize={setCloudH} onPick={onPick} onClose={closeCloud} onRewind={msgMenu} />
+                               onResize={setCloudH} onPick={msgMenu} onClose={closeCloud} onRewind={msgMenu} />
         case SESSIONS_TAB: return <SessionsGroup focused={contentFocused}
                                                  sub={subTabs[SESSIONS_TAB] ?? 0}
                                                  setSub={sessSub}
@@ -842,7 +954,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
                                            setSub={eikSub} />
         default: {
           const r = extra[tab - TABS.length]
-          return r ? r.render() : null
+          return r ? r.render({ sessionId: info?.session_id || sid, liveSessionId: sid }) : null
         }
       }
     })()
