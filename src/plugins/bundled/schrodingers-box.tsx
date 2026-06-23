@@ -138,6 +138,7 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
   useEffect(() => {
     if (!projectRoot) return
     const tick = async () => {
+      if (api.route.current !== TAB_NAME) return
       const a = loadActive(projectRoot)
       if (a && !ownsGroup(a)) {
         setHiddenActive(a)
@@ -727,25 +728,40 @@ const plugin: HermPlugin = {
       { title: "Schrödinger's Box: open tab", value: "schrodinger.box.open", category: "Schrödinger", onSelect: () => api.route.navigate(TAB_NAME) },
     ])
 
-    // Auto-navigate to the tab ONLY when a new active.json is created
-    // with open_tab=true. We clear the flag after navigating.
+    // Auto-navigate + collapse activate — one timer; only while box dir exists.
     let lastSeenGroup = ""
-    const navTick = setInterval(() => {
-      const r = resolveSchrodingerRoot()
-      if (!r) return
-      const activePath = join(r, schrodingerDirFor(r), "active.json")
-      const a = readJson<any>(activePath, null)
-      if (!a) { lastSeenGroup = ""; return }
-      const gid = a.group_id
-      if (!gid || gid === lastSeenGroup) return
-      lastSeenGroup = gid
-      if (a.open_tab === true && a.owner_process_pid === process.pid) {
-        a.open_tab = false
-        void writeJsonQueued(activePath, { ...a, open_tab: false })
-        api.route.navigate(TAB_NAME)
-      }
+    const boxTick = setInterval(() => {
+      void (async () => {
+        const r = resolveSchrodingerRoot()
+        if (!r) return
+        const boxPath = join(r, schrodingerDirFor(r))
+        if (!existsSync(boxPath)) return
+        const activePath = join(boxPath, "active.json")
+        const a = readJson<any>(activePath, null)
+        if (!a) { lastSeenGroup = ""; return }
+        const gid = a.group_id
+        if (gid && gid !== lastSeenGroup) {
+          lastSeenGroup = gid
+          if (a.open_tab === true && a.owner_process_pid === process.pid) {
+            await writeJsonQueued(activePath, { ...a, open_tab: false })
+            api.route.navigate(TAB_NAME)
+          }
+        }
+        if (a.activate_session_id == null) return
+        const target = String(a.activate_session_id)
+        const cleared = { ...a }
+        delete cleared.activate_session_id
+        await writeJsonQueued(activePath, cleared)
+        try {
+          await api.client.request("session.activate", { session_id: target })
+          api.route.navigate("Chat")
+          api.ui.toast({ variant: "info", message: `Resumed session ${target.slice(0, 8)}…` })
+        } catch (e) {
+          api.ui.toast({ variant: "error", message: `Activate failed: ${(e as Error).message}` })
+        }
+      })()
     }, 500)
-    api.lifecycle.onDispose(() => clearInterval(navTick))
+    api.lifecycle.onDispose(() => clearInterval(boxTick))
   },
 }
 

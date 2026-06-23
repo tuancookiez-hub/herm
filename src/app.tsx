@@ -27,7 +27,6 @@ import { readChangelog } from "./service/hermes-home"
 import { openMessage } from "./dialogs/message"
 import { openModelPicker } from "./dialogs/model-picker"
 import { resolveSchrodingerRoot, schrodingerDirFor } from "./utils/schrodinger-root"
-import { writeJsonQueued } from "./utils/schrodinger-io"
 import { existsSync } from "fs"
 import { join } from "path"
 import { openTextPrompt } from "./dialogs/text-prompt"
@@ -558,57 +557,6 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
     toast.show({ variant: "success", message: `forked → ${res.title ?? res.session_id}` })
   }, [gw, toast, activateSession])
 
-  // Listen for the Schrödinger's Box plugin's "please activate this
-  // session" signal. The plugin writes the chosen session id into
-  // no-new-RPC merge path: the plugin never touches the gateway.
-  useEffect(() => {
-    let pollId: ReturnType<typeof setInterval> | undefined
-    const tick = async () => {
-      try {
-        const root = resolveSchrodingerRoot()
-        if (!root) return
-        const fs = await import("fs")
-        const path = await import("path")
-        const boxDir = path.join(root, schrodingerDirFor(root))
-        if (!fs.existsSync(boxDir)) return
-        const activePath = path.join(boxDir, "active.json")
-        if (!fs.existsSync(activePath)) return
-        const aj = JSON.parse(fs.readFileSync(activePath, "utf-8") || "null")
-        if (!aj || aj.activate_session_id == null) return
-        const target = String(aj.activate_session_id)
-        const cleared = { ...aj }
-        delete cleared.activate_session_id
-        await writeJsonQueued(activePath, cleared)
-        if (target === sidRef.current) return
-        goToTab(CHAT_TAB)
-        toast.show({ variant: "info", message: `Resuming session ${target.slice(0, 8)}…` })
-        await activateSession(target)
-        toast.show({ variant: "success", message: `Session resumed` })
-      } catch (e) {
-        toast.show({ variant: "error", message: `Activation failed: ${(e as Error).message}` })
-      }
-    }
-    const arm = () => {
-      const root = resolveSchrodingerRoot()
-      if (!root) {
-        if (pollId) { clearInterval(pollId); pollId = undefined }
-        return
-      }
-      const boxDir = join(root, schrodingerDirFor(root))
-      if (!existsSync(boxDir)) {
-        if (pollId) { clearInterval(pollId); pollId = undefined }
-        return
-      }
-      if (!pollId) pollId = setInterval(() => { void tick() }, 500)
-    }
-    arm()
-    const armWatch = setInterval(arm, 5000)
-    return () => {
-      if (pollId) clearInterval(pollId)
-      clearInterval(armWatch)
-    }
-  }, [activateSession, toast, goToTab])
-
   // Fork into Schrödinger's Box: branch the current session into two
   // separate sessions, both inheriting the full chat history. The tab
   // shows their diverging replies in parallel; picking one activates
@@ -756,13 +704,15 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
     const withMedia = attachments.length
       ? [...attachments.flatMap(a => a.path ? [`MEDIA:${a.path}`] : []), text].filter(Boolean).join("\n")
       : text
+    // Echo the user turn immediately — gateway ACK can lag (agent loop,
+    // queued RPCs from other tabs). Upstream waited on .then(); that made
+    // Enter feel stuck while prompt.submit was slow.
+    dispatch({ kind: "user", text: withMedia })
+    setAttachments([])
+    undone.current = []
+    setTab(CHAT_TAB)
     gw.request("prompt.submit", { text })
-      .then(() => {
-        dispatch({ kind: "user", text: withMedia })
-        setAttachments([])
-        undone.current = []
-        setTab(CHAT_TAB)
-      })
+      .then(() => {})
       .catch((e: Error) => {
         const msg = e instanceof Error ? e.message : String(e)
         if (BUSY_RE.test(msg)) {
