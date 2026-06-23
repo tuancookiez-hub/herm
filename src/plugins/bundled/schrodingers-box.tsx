@@ -9,12 +9,13 @@
 // forks created before the rename, the file readers fall back to
 // `.multiverse/` if `.schrodinger/` is missing.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs"
+import { readFileSync, existsSync, mkdirSync } from "fs"
 import { join } from "path"
 import { useEffect, useRef, useState } from "react"
 import { useKeyboard } from "@opentui/react"
 import type { HermPlugin, HermPluginApi } from "../types"
 import { resolveSchrodingerRoot, schrodingerDirFor } from "../../utils/schrodinger-root"
+import { safeGroupId, writeJsonQueued } from "../../utils/schrodinger-io"
 import { openModelPicker } from "../../dialogs/model-picker"
 
 const POLL_MS = 1000
@@ -83,6 +84,7 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
   const [lanes, setLanes] = useState<Lane[]>([])
   const [laneText, setLaneText] = useState<Record<string, string>>({})
   const [focusIdx, setFocusIdx] = useState(0)
+  const [phase, setPhase] = useState<Phase>("configure")
   const lastGroupId = useRef<string>("")
   // Track which session_ids belong to which lane, for event filtering.
   const sessionToLane = useRef<Record<string, string>>({})
@@ -94,9 +96,9 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
 
   function ownsGroup(a: Group | null): boolean {
     if (!a) return false
+    if (a.owner_live_session_id && liveSessionId && a.owner_live_session_id === liveSessionId) return true
     const owner = a.owner_session_id || a.parent_session_id
     if (owner && currentSessionId && owner === currentSessionId) return true
-    if (a.owner_live_session_id && liveSessionId && a.owner_live_session_id === liveSessionId) return true
     return false
   }
 
@@ -149,7 +151,8 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
       }
       setHiddenActive(null)
       setActive(a)
-      if (!a) { setLanes([]); setLaneText({}); return }
+      if (!a) { setLanes([]); setLaneText({}); setPhase("configure"); return }
+      if (!safeGroupId(a.group_id)) return
       if (a.group_id !== lastGroupId.current) {
         lastGroupId.current = a.group_id
         submitTimestampRef.current = ""
@@ -161,6 +164,8 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
       }
       const manifestPath = join(projectRoot, schrodingerDirFor(projectRoot), "groups", a.group_id, "manifest.json")
       let m = readJson<any>(manifestPath, { lanes: [], phase: "configure" })
+      const p: Phase = m.phase === "running" || m.phase === "compare" ? m.phase : "configure"
+      setPhase(p)
       setLanes(m.lanes ?? [])
 
       // Update session-to-lane mapping for the event listener.
@@ -189,11 +194,14 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
             // inherited messages and only show the NEW lane response.
             // On first poll during "running" phase, capture the baseline.
             if (m.phase === "running" && lane.baseline_count === undefined) {
-              lane.baseline_count = allMessages.length
-              // Persist to manifest so it survives across poll ticks.
-              writeFileSync(manifestPath, JSON.stringify(m, null, 2), "utf-8")
+              const snap = { ...m, lanes: (m.lanes ?? []).map((l: Lane) =>
+                l.id === lane.id ? { ...l, baseline_count: allMessages.length } : { ...l }
+              ) }
+              m = snap
+              await writeJsonQueued(manifestPath, snap)
             }
-            const baseline = lane.baseline_count ?? allMessages.length
+            const laneRow = (m.lanes ?? []).find((l: Lane) => l.id === lane.id)
+            const baseline = laneRow?.baseline_count ?? allMessages.length
             const newMessages = allMessages.slice(baseline)
             // The lane's response is the last assistant message AFTER
             // the baseline (i.e. the one added by prompt.submit on this
@@ -239,11 +247,12 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
             return live.length > 0 || polled.length > 0
           })
           if (allHave && (m.lanes ?? []).length > 0) {
-            m.phase = "compare"
-            writeFileSync(manifestPath, JSON.stringify(m, null, 2), "utf-8")
+            const snap = { ...m, phase: "compare" as Phase }
+            m = snap
+            await writeJsonQueued(manifestPath, snap)
             const activePath = join(projectRoot, schrodingerDirFor(projectRoot), "active.json")
             const aj = readJson<any>(activePath, null)
-            if (aj) { aj.phase = "compare"; writeFileSync(activePath, JSON.stringify(aj, null, 2), "utf-8") }
+            if (aj) await writeJsonQueued(activePath, { ...aj, phase: "compare" })
           }
         }
       } else {
@@ -296,22 +305,7 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
     )
   }
 
-  // Phase is configured by the manifest's phase field, set by app.tsx
-  // when lanes are submitted and by the polling when responses come back.
-  // We override the local "compare" detection because branched sessions
-  // already contain the prior assistant turn from the original chat —
-  // their history isn't empty, so polling would falsely report "ready".
-  // Until the user clicks Run, we stay in "configure" even if there's
-  // text in the lane.
-  const manifestPhase: Phase = (() => {
-    try {
-      const manifestPath = join(projectRoot, schrodingerDirFor(projectRoot), "groups", active.group_id, "manifest.json")
-      const m = readJson<any>(manifestPath, {})
-      if (m.phase === "running" || m.phase === "compare") return m.phase
-    } catch {}
-    return "configure"
-  })()
-  const phase: Phase = manifestPhase
+  // Phase comes from manifest via the polling effect (setPhase).
 
   // ─── Actions ───
   function pickPath(slot: "A" | "B") {
@@ -325,7 +319,7 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
         const newLanes = [...(m.lanes ?? [])]
         newLanes[idx] = { ...newLanes[idx], provider, model }
         m.lanes = newLanes
-        writeFileSync(manifestPath, JSON.stringify(m, null, 2), "utf-8")
+        void writeJsonQueued(manifestPath, m)
         setLanes(newLanes)
         api.ui.toast({ variant: "success", message: `Path ${slot} → ${provider}/${model}` })
       },
@@ -340,7 +334,7 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
     const newLanes = [...(m.lanes ?? [])]
     newLanes[idx] = { ...newLanes[idx], prompt: text }
     m.lanes = newLanes
-    writeFileSync(manifestPath, JSON.stringify(m, null, 2), "utf-8")
+    void writeJsonQueued(manifestPath, m)
     setLanes(newLanes)
   }
 
@@ -398,10 +392,10 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
     // Update active.json + manifest phase → "running" so the tab
     // shows the streaming view.
     m.phase = "running"
-    writeFileSync(manifestPath, JSON.stringify(m, null, 2), "utf-8")
+    await writeJsonQueued(manifestPath, m)
     const activePath = join(projectRoot, schrodingerDirFor(projectRoot), "active.json")
     const a = readJson<any>(activePath, null)
-    if (a) { a.phase = "running"; writeFileSync(activePath, JSON.stringify(a, null, 2), "utf-8") }
+    if (a) await writeJsonQueued(activePath, { ...a, phase: "running" })
 
     // Submit each lane's prompt to its branched session.
     // Uses the user's typed prompt, falling back to default_prompt
@@ -460,16 +454,20 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
       m.lanes = (m.lanes ?? []).map((l: Lane) =>
         l.id === focused.id ? { ...l, status: "merged" } : { ...l, status: "archived" }
       )
-      writeFileSync(manifestPath, JSON.stringify(m, null, 2), "utf-8")
-    } catch {}
+      await writeJsonQueued(manifestPath, m)
+    } catch (e) {
+      api.ui.toast({ variant: "error", message: `Manifest merge failed: ${(e as Error).message}` })
+    }
     // Signal app.tsx to switch to the chosen session.
     try {
       const activePath = join(projectRoot, schrodingerDirFor(projectRoot), "active.json")
       const aj = readJson<any>(activePath, null)
       if (aj) {
-        aj.activate_session_id = focused.session_id
-        aj.phase = "merged"
-        writeFileSync(activePath, JSON.stringify(aj, null, 2), "utf-8")
+        await writeJsonQueued(activePath, {
+          ...aj,
+          activate_session_id: focused.session_id,
+          phase: "merged",
+        })
       }
     } catch (e) {
       api.ui.toast({ variant: "error", message: `Activate failed: ${(e as Error).message}` })
@@ -743,7 +741,7 @@ const plugin: HermPlugin = {
       lastSeenGroup = gid
       if (a.open_tab === true && a.owner_process_pid === process.pid) {
         a.open_tab = false
-        try { writeFileSync(activePath, JSON.stringify(a, null, 2), "utf-8") } catch {}
+        void writeJsonQueued(activePath, { ...a, open_tab: false })
         api.route.navigate(TAB_NAME)
       }
     }, 500)

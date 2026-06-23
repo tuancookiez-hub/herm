@@ -61,6 +61,7 @@ export function useStream(c: Ctx) {
   useEffect(() => () => {
     timers.current.forEach(clearTimeout)
     timers.current = []
+    if (deltas.current.timer) clearTimeout(deltas.current.timer)
   }, [])
 
   // Client-side interrupt latch: flipped on Esc×2 before the gateway
@@ -129,6 +130,11 @@ export function useStream(c: Ctx) {
           x.sessionStart.current = Date.now()
           if (r.messages.length) x.dispatch({ kind: "load", messages: r.messages })
           if (r.note) toast.show({ variant: "info", message: r.note })
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err)
+          process.stderr.write(`herm: session boot failed: ${msg}\n`)
+          toast.show({ variant: "error", message: `session boot failed: ${msg}` })
+          x.dispatch({ kind: "system", text: `session boot failed: ${msg}` })
         })
       },
       onSessionInfo: (si) => {

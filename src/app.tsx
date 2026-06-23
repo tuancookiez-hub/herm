@@ -27,6 +27,9 @@ import { readChangelog } from "./service/hermes-home"
 import { openMessage } from "./dialogs/message"
 import { openModelPicker } from "./dialogs/model-picker"
 import { resolveSchrodingerRoot, schrodingerDirFor } from "./utils/schrodinger-root"
+import { writeJsonQueued } from "./utils/schrodinger-io"
+import { existsSync } from "fs"
+import { join } from "path"
 import { openTextPrompt } from "./dialogs/text-prompt"
 import { parseEikonFile, type ParsedEikon } from "./components/avatar/eikon"
 import { bundledEikonPath } from "./components/avatar/bundled"
@@ -100,6 +103,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
   const [ready, setReady] = useState(false)
   const [sid, setSid] = useState("")
   const sidRef = useRef(sid); sidRef.current = sid
+  const forkSchrodingerBusy = useRef(false)
   // Publish the active session id so providers above AppInner (most
   // importantly ThemeProvider) can resolve per-session state. Empty
   // string during splash and between session.close() + session.create().
@@ -556,36 +560,54 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
 
   // Listen for the Schrödinger's Box plugin's "please activate this
   // session" signal. The plugin writes the chosen session id into
-  // active.json.activate_session_id; we poll that file every 800ms
-  // and call activateSession, then clear the field. This is the
   // no-new-RPC merge path: the plugin never touches the gateway.
   useEffect(() => {
-    const tick = setInterval(async () => {
+    let pollId: ReturnType<typeof setInterval> | undefined
+    const tick = async () => {
       try {
-        const root = (typeof process !== "undefined" && process.env?.SCHRODINGER_PROJECT_ROOT)
-          || (typeof process !== "undefined" && process.env?.MULTIVERSE_PROJECT_ROOT)
-          || (typeof process !== "undefined" && process.cwd?.())
-          || ""
+        const root = resolveSchrodingerRoot()
         if (!root) return
         const fs = await import("fs")
         const path = await import("path")
-        const activePath = path.join(root, schrodingerDirFor(root), "active.json")
+        const boxDir = path.join(root, schrodingerDirFor(root))
+        if (!fs.existsSync(boxDir)) return
+        const activePath = path.join(boxDir, "active.json")
         if (!fs.existsSync(activePath)) return
         const aj = JSON.parse(fs.readFileSync(activePath, "utf-8") || "null")
         if (!aj || aj.activate_session_id == null) return
         const target = String(aj.activate_session_id)
-        delete aj.activate_session_id
-        fs.writeFileSync(activePath, JSON.stringify(aj, null, 2), "utf-8")
+        const cleared = { ...aj }
+        delete cleared.activate_session_id
+        await writeJsonQueued(activePath, cleared)
         if (target === sidRef.current) return
-        toast.show({ variant: "info", message: `Activating session ${target.slice(0, 8)}…` })
+        goToTab(CHAT_TAB)
+        toast.show({ variant: "info", message: `Resuming session ${target.slice(0, 8)}…` })
         await activateSession(target)
-        toast.show({ variant: "success", message: `Session activated` })
+        toast.show({ variant: "success", message: `Session resumed` })
       } catch (e) {
         toast.show({ variant: "error", message: `Activation failed: ${(e as Error).message}` })
       }
-    }, 800)
-    return () => clearInterval(tick)
-  }, [activateSession, toast])
+    }
+    const arm = () => {
+      const root = resolveSchrodingerRoot()
+      if (!root) {
+        if (pollId) { clearInterval(pollId); pollId = undefined }
+        return
+      }
+      const boxDir = join(root, schrodingerDirFor(root))
+      if (!existsSync(boxDir)) {
+        if (pollId) { clearInterval(pollId); pollId = undefined }
+        return
+      }
+      if (!pollId) pollId = setInterval(() => { void tick() }, 500)
+    }
+    arm()
+    const armWatch = setInterval(arm, 5000)
+    return () => {
+      if (pollId) clearInterval(pollId)
+      clearInterval(armWatch)
+    }
+  }, [activateSession, toast, goToTab])
 
   // Fork into Schrödinger's Box: branch the current session into two
   // separate sessions, both inheriting the full chat history. The tab
@@ -593,8 +615,15 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
   // that branch as the new active session.
   const forkSchrodinger = useCallback(async (m: Message) => {
     if (turnRef.current.streaming) return
+    if (forkSchrodingerBusy.current) {
+      toast.show({ variant: "warning", message: "Fork already in progress…" })
+      return
+    }
+    forkSchrodingerBusy.current = true
+    try {
     const promptText = m.parts.filter(p => p.type === "text").map(p => p.content).join("")
-    const originalSid = sidRef.current  // captured pre-branch — the "real" timeline
+    const originalSid = sidRef.current
+    const ownerDb = info?.session_id || ""
 
     // 1) Branch the session TWICE sequentially (not parallel) so each
     //    gets a distinct title — parallel branches race on the title
@@ -609,14 +638,9 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
       .catch((e: Error) => { toast.show({ variant: "error", message: `Branch B failed: ${e.message}` }); return null })
     if (!branchA?.session_id || !branchB?.session_id) return
 
-    // 2) The user stays in the original session. The branched sessions
-    //    exist as orphans. The tab will call prompt.submit to them
-    //    once the user picks models.
+    const parentDbFinal = branchA.parent || ownerDb
+    const ownerDbFinal = ownerDb || branchA.parent || ""
 
-    // 3) Write manifest + active.json so the tab can find them.
-    //    The on-disk dir is `.schrodinger/`. For backward
-    //    compatibility with old forks, schrodingerDirFor() falls
-    //    back to `.multiverse/` if `.schrodinger/` is missing.
     const root = resolveSchrodingerRoot()
     if (!root) {
       toast.show({ variant: "error", message: "Could not find .schrodinger/ — cd to project root or set SCHRODINGER_PROJECT_ROOT" })
@@ -627,40 +651,38 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
     const activePath = `${root}/${schrodingerDirFor(root)}/active.json`
     const manifestPath = `${groupDir}/manifest.json`
 
-    void (async () => {
-      await Bun.write(manifestPath, JSON.stringify({
+    await Bun.write(manifestPath, JSON.stringify({
         id: groupId,
-        // session.branch returns both the short live session_id and the
-        // persisted DB parent key. Merge must target the DB key, not the
-        // short live id, or state.db lookup fails.
-        parent_session_id: branchA!.parent || originalSid,
-        owner_session_id: branchA!.parent || info?.session_id || originalSid,
+        parent_session_id: parentDbFinal,
+        owner_session_id: ownerDbFinal,
         owner_live_session_id: originalSid,
         owner_process_pid: process.pid,
         created_at: new Date().toISOString(),
         phase: "configure",
         status: "pending",
         lanes: [
-          { id: "lane-0", label: "PATH A", session_id: branchA!.session_id, db_session_id: branchA!.db_session_id, session_title: branchA!.title || `Schrödinger's Box ${groupId} · PATH A`, provider: "", model: "", prompt: "", default_prompt: promptText, status: "ready" },
-          { id: "lane-1", label: "PATH B", session_id: branchB!.session_id, db_session_id: branchB!.db_session_id, session_title: branchB!.title || `Schrödinger's Box ${groupId} · PATH B`, provider: "", model: "", prompt: "", default_prompt: promptText, status: "ready" },
+          { id: "lane-0", label: "PATH A", session_id: branchA.session_id, db_session_id: branchA.db_session_id, session_title: branchA.title || `Schrödinger's Box ${groupId} · PATH A`, provider: "", model: "", prompt: "", default_prompt: promptText, status: "ready" },
+          { id: "lane-1", label: "PATH B", session_id: branchB.session_id, db_session_id: branchB.db_session_id, session_title: branchB.title || `Schrödinger's Box ${groupId} · PATH B`, provider: "", model: "", prompt: "", default_prompt: promptText, status: "ready" },
         ],
       }, null, 2))
-      await Bun.write(activePath, JSON.stringify({
+    await Bun.write(activePath, JSON.stringify({
         group_id: groupId,
         phase: "configure",
         user_prompt: promptText,
         project_root: root,
-        parent_session_id: branchA!.parent || originalSid,
-        owner_session_id: branchA!.parent || info?.session_id || originalSid,
+        parent_session_id: parentDbFinal,
+        owner_session_id: ownerDbFinal,
         owner_live_session_id: originalSid,
         owner_process_pid: process.pid,
         open_tab: true,
-        branch_a: branchA!.db_session_id || branchA!.session_id,
-        branch_b: branchB!.db_session_id || branchB!.session_id,
+        branch_a: branchA.db_session_id || branchA.session_id,
+        branch_b: branchB.db_session_id || branchB.session_id,
       }, null, 2))
-    })()
 
     toast.show({ title: "Schrödinger's Box", message: `Pick 2 models in the new tab · ${groupId}`, variant: "info" })
+    } finally {
+      forkSchrodingerBusy.current = false
+    }
   }, [gw, toast, info])
 
   const msgMenu = useCallback((m?: Message) => {
