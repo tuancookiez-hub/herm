@@ -85,14 +85,24 @@ export function turnReducer(state: TurnState, a: Action): TurnState {
       }
     }
 
-    case "message.complete":
+    case "message.complete": {
+      const last = state.messages[state.messages.length - 1]
+      const finalText = a.text != null ? sanitize(a.text) : undefined
+      const awaiting =
+        state.streaming &&
+        !state.hasContent &&
+        !state.toolActive &&
+        last?.role === "user" &&
+        (finalText == null || finalText === "")
+      if (awaiting) return state
       return {
         ...state,
         streaming: false,
         hasContent: false,
         toolActive: false,
-        messages: finalize(state.messages, a.text != null ? sanitize(a.text) : undefined, a.usage),
+        messages: finalize(state.messages, finalText, a.usage),
       }
+    }
 
     case "tool.start": {
       // `context` carries the raw tool input; when JSON-shaped we keep it
@@ -153,7 +163,11 @@ export function turnReducer(state: TurnState, a: Action): TurnState {
     }
 
     case "thinking":
-      return { ...state, messages: upsertThinking(state.messages, sanitize(a.text), a.final, a.verbose) }
+      return {
+        ...state,
+        streaming: true,
+        messages: upsertThinking(state.messages, sanitize(a.text), a.final, a.verbose),
+      }
 
     case "subagent":
       return { ...state, messages: renderSubagent(state.messages, a.event, a.payload) }

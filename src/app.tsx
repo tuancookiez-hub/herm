@@ -107,7 +107,6 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
   // importantly ThemeProvider) can resolve per-session state. Empty
   // string during splash and between session.close() + session.create().
   useEffect(() => { setCurrentSessionId(sid) }, [sid])
-  const capabilities = sessionCapabilities({ sid, ready, streaming: turn.streaming })
   const [tab, setTab] = useState(CHAT_TAB)
   // Sub-tab per group — Chat has none, so key 0 is unused.
   // Defensive clamp lives inside each group (SessionsGroup/Automation/
@@ -173,6 +172,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
   const [escHint, setEscHint] = useState(false)
   const [eikon, setEikon] = useState<ParsedEikon | undefined>(undefined)
   const [queue, setQueue] = useState<string[]>([])
+  const [outbound, setOutbound] = useState(false)
   const [busy, setBusy] = useState<"queue" | "steer" | "interrupt">("queue")
   // The global useKeyboard re-renders AppInner on every key/mouse
   // event; memo() on Chat/Composer/etc is the only firewall. Callbacks
@@ -183,6 +183,8 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
   // instead (same shape as sidRef/cmdsRef/sendRef below).
   const turnRef = useRef(turn); turnRef.current = turn
   const queueRef = useRef(queue); queueRef.current = queue
+  const composerBusy = turn.streaming || outbound
+  const capabilities = sessionCapabilities({ sid, ready, streaming: composerBusy })
   // Welcome-state chrome over an empty transcript. Composer stays live
   // underneath; first send dismisses. `/splash` re-summons mid-session
   // (Esc-dismissable in that case only).
@@ -360,7 +362,18 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
     setStatus("")
     setTitle("")
     setAttachments([])
+    setOutbound(false)
   }, [toast])
+
+  useEffect(() => {
+    if (!outbound) return
+    if (turn.streaming) {
+      setOutbound(false)
+      return
+    }
+    const last = turn.messages[turn.messages.length - 1]
+    if (last?.role !== "user") setOutbound(false)
+  }, [turn.streaming, turn.messages, outbound])
 
   const newSession = useCallback(async () => {
     const prev = sidRef.current
@@ -704,19 +717,27 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
     const withMedia = attachments.length
       ? [...attachments.flatMap(a => a.path ? [`MEDIA:${a.path}`] : []), text].filter(Boolean).join("\n")
       : text
-    // Echo the user turn immediately — gateway ACK can lag (agent loop,
-    // queued RPCs from other tabs). Upstream waited on .then(); that made
-    // Enter feel stuck while prompt.submit was slow.
+    inflight.current = true
+    setOutbound(true)
     dispatch({ kind: "user", text: withMedia })
+    dispatch({ kind: "message.start" })
     setAttachments([])
     undone.current = []
     setTab(CHAT_TAB)
+    setStatus("Sending…")
     gw.request("prompt.submit", { text })
-      .then(() => {})
+      .then(() => {
+        if (!turnRef.current.streaming) setStatus("")
+      })
       .catch((e: Error) => {
         const msg = e instanceof Error ? e.message : String(e)
         if (BUSY_RE.test(msg)) {
+          dispatch({ kind: "message.complete" })
+          const msgs = turnRef.current.messages
+          if (msgs.length && msgs[msgs.length - 1]?.role === "user")
+            dispatch({ kind: "load", messages: msgs.slice(0, -1) })
           inflight.current = true
+          setOutbound(false)
           setQueue(q => [text, ...q])
           setStatus("queued for next turn")
           toast.show({ variant: "info", message: "queued for next turn" })
@@ -727,6 +748,8 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
           return
         }
         inflight.current = false
+        setOutbound(false)
+        dispatch({ kind: "message.complete" })
         dispatch({ kind: "system", text: `submit failed: ${msg}` })
         toast.show({ variant: "error", message: msg })
       })
@@ -900,7 +923,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
   const content = () => {
     const inner = (() => {
       switch (tab) {
-        case CHAT_TAB: return <Chat messages={turn.messages} streaming={turn.streaming}
+        case CHAT_TAB: return <Chat messages={turn.messages} streaming={composerBusy}
                                prompt={promptWire}
                                cloud={cloud} cloudH={cloudH} pick={pick}
                                onResize={setCloudH} onPick={msgMenu} onClose={closeCloud} onRewind={msgMenu} />
@@ -972,7 +995,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
               <VoiceIndicator voice={voice.state} keyLabel={voice.keyLabel} />
               <Composer
                 ref={composer}
-                focused={inputFocused} canSubmitPrompt={capabilities.canSubmitPrompt} ready={ready} streaming={turn.streaming}
+                focused={inputFocused} canSubmitPrompt={capabilities.canSubmitPrompt} ready={ready} streaming={composerBusy}
                 status={status}
                 model={info?.model}
                 hidden={hidden}

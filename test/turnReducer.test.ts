@@ -61,6 +61,24 @@ describe("turnReducer", () => {
     expect(last(s).parts[0]).toMatchObject({ type: "text", content: "answer", streaming: false })
   })
 
+  test("ignores stale message.complete while awaiting first assistant output", () => {
+    const s = run([
+      { kind: "user", text: "hi" },
+      { kind: "message.start" },
+      { kind: "message.complete" },
+    ])
+    expect(s.streaming).toBe(true)
+    expect(last(s).role).toBe("user")
+  })
+
+  test("thinking sets streaming true", () => {
+    const s = run([
+      { kind: "user", text: "q" },
+      { kind: "thinking", text: "hmm", final: false },
+    ])
+    expect(s.streaming).toBe(true)
+  })
+
   test("tool.progress updates most-recently-started running tool", () => {
     const s = run([
       { kind: "message.start" },
