@@ -13,6 +13,7 @@ import { readFileSync, existsSync, mkdirSync } from "fs"
 import { join } from "path"
 import { useEffect, useRef, useState } from "react"
 import { useKeyboard } from "@opentui/react"
+import type { TextareaRenderable } from "@opentui/core"
 import type { HermPlugin, HermPluginApi } from "../types"
 import { resolveSchrodingerRoot, schrodingerDirFor } from "../../utils/schrodinger-root"
 import { safeGroupId, writeJsonQueued } from "../../utils/schrodinger-io"
@@ -41,6 +42,7 @@ type Group = {
   group_id: string
   phase: Phase
   user_prompt: string
+  fork_from_role?: string
   project_root: string
   parent_session_id: string
   owner_session_id?: string
@@ -63,6 +65,7 @@ function loadActive(root: string): Group | null {
     group_id: raw.group_id,
     phase: raw.phase,
     user_prompt: raw.user_prompt ?? "",
+    fork_from_role: raw.fork_from_role,
     project_root: raw.project_root ?? root,
     parent_session_id: raw.parent_session_id ?? "",
     owner_session_id: raw.owner_session_id,
@@ -327,36 +330,14 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
     })
   }
 
-  function setLanePrompt(slot: "A" | "B", text: string) {
+  function setBothPrompts(text: string) {
     if (!active) return
-    const idx = slot === "A" ? 0 : 1
     const manifestPath = join(projectRoot, schrodingerDirFor(projectRoot), "groups", active.group_id, "manifest.json")
     const m = readJson<any>(manifestPath, { lanes: [] })
-    const newLanes = [...(m.lanes ?? [])]
-    newLanes[idx] = { ...newLanes[idx], prompt: text }
+    const newLanes = (m.lanes ?? []).map((l: Lane) => ({ ...l, prompt: text }))
     m.lanes = newLanes
     void writeJsonQueued(manifestPath, m)
     setLanes(newLanes)
-  }
-
-  function mirrorPrompts(from: "A" | "B", to: "B" | "A") {
-    const src = lanes[from === "A" ? 0 : 1]?.prompt ?? ""
-    setLanePrompt(to, src)
-    api.ui.toast({ variant: "info", message: `Copied PATH ${from} prompt → PATH ${to}` })
-  }
-
-  // Sync both lanes to PATH A's prompt. Useful when you type once and
-  // want both lanes to run with identical prompts but different models.
-  function syncBoth() {
-    const a = lanes[0]?.prompt ?? ""
-    setLanePrompt("B", a)
-    api.ui.toast({ variant: "info", message: "Both lanes set to PATH A's prompt" })
-  }
-
-  function clearPrompts() {
-    setLanePrompt("A", "")
-    setLanePrompt("B", "")
-    api.ui.toast({ variant: "info", message: "Both prompts cleared" })
   }
 
   // Run both lanes in parallel via prompt.submit to their branched
@@ -474,7 +455,6 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
       api.ui.toast({ variant: "error", message: `Activate failed: ${(e as Error).message}` })
       return
     }
-    setTimeout(() => api.route.navigate("Chat"), 400)
   }
 
   function peekBranch(lane: Lane) {
@@ -501,10 +481,7 @@ function AgamottoTab(props: { api: HermPluginApi; currentSessionId?: string; liv
         focusIdx={focusIdx}
         setFocusIdx={setFocusIdx}
         pickPath={pickPath}
-        setLanePrompt={setLanePrompt}
-        mirrorPrompts={mirrorPrompts}
-        syncBoth={syncBoth}
-        clearPrompts={clearPrompts}
+        setBothPrompts={setBothPrompts}
         runLanes={runLanes}
       />
     )
@@ -627,24 +604,43 @@ function CONFIGURE_VIEW(props: {
   focusIdx: number
   setFocusIdx: (n: number) => void
   pickPath: (s: "A" | "B") => void
-  setLanePrompt: (s: "A" | "B", t: string) => void
-  mirrorPrompts: (f: "A" | "B", to: "B" | "A") => void
-  syncBoth: () => void
-  clearPrompts: () => void
+  setBothPrompts: (text: string) => void
   runLanes: () => void
 }) {
-  const { api, t, active, lanes, focusIdx, setFocusIdx, pickPath, setLanePrompt, mirrorPrompts, syncBoth, clearPrompts, runLanes } = props
+  const { api, t, active, lanes, focusIdx, setFocusIdx, pickPath, setBothPrompts, runLanes } = props
   const pathA = lanes[0]
   const pathB = lanes[1]
   const bothPicked = pathA?.model && pathB?.model
+  const forkPreview = active.user_prompt || pathA?.default_prompt || ""
+  const forkLabel = active.fork_from_role === "user" ? "user" : "assistant"
+  const sharedPrompt = pathA?.prompt ?? pathB?.prompt ?? ""
+  const promptRef = useRef<TextareaRenderable | null>(null)
+
   return (
     <box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1} gap={1}>
       <text fg={t.accent} wrapMode="word">Schrödinger's Box · {active.group_id} · configure</text>
       <text fg={t.textMuted} wrapMode="word">Branched from session {active.parent_session_id?.slice(0, 8) || "?"}…</text>
-      <text fg={t.textMuted} wrapMode="word">Pick 2 models, then Run. The lanes share the same prompt + full chat history; pick which reply becomes your timeline.</text>
+      <text fg={t.textMuted} wrapMode="word">Pick 2 models, type one shared prompt, then Run. Full history is on both branches.</text>
 
-      <box flexDirection="row" gap={2}>
-        <box flexGrow={1} flexDirection="column" border borderColor={t.border} paddingX={1} paddingY={1} gap={1}>
+      <box flexDirection="column" border borderColor={t.border} paddingX={1} paddingY={1} gap={0} flexShrink={0} height={8}>
+        <text fg={t.textMuted} wrapMode="word">Forked {forkLabel} message (timeline at fork):</text>
+        <scrollbox scrollY flexGrow={1} height="100%">
+          <text fg={t.text} wrapMode="word">{forkPreview || "(empty)"}</text>
+        </scrollbox>
+      </box>
+
+      <box flexDirection="row" gap={2} flexShrink={0} height={10}>
+        <box
+          flexGrow={1}
+          flexDirection="column"
+          border
+          borderColor={focusIdx === 0 ? t.accent : t.border}
+          paddingX={1}
+          paddingY={1}
+          gap={1}
+          height="100%"
+          onMouseDown={() => setFocusIdx(0)}
+        >
           <text fg={t.accent} wrapMode="word">PATH A</text>
           <text fg={t.textMuted} wrapMode="word">session: {pathA?.session_id?.slice(0, 8) || "?"}…</text>
           {pathA?.model ? (
@@ -655,17 +651,18 @@ function CONFIGURE_VIEW(props: {
           ) : (
             <text fg={t.textMuted} onMouseDown={() => pickPath("A")} wrapMode="word">[ Pick model → ]</text>
           )}
-          <text fg={t.textMuted} wrapMode="word">Prompt:</text>
-          <input
-            value={pathA?.prompt ?? ""}
-            placeholder={pathA?.default_prompt ? `default: ${pathA.default_prompt.slice(0, 80)}${pathA.default_prompt.length > 80 ? "…" : ""}` : "type prompt for PATH A…"}
-            onInput={(v) => setLanePrompt("A", v)}
-            onSubmit={() => api.ui.toast({ variant: "info", message: "PATH A prompt saved" })}
-            textColor={t.text}
-            focused={focusIdx === 0}
-          />
         </box>
-        <box flexGrow={1} flexDirection="column" border borderColor={t.border} paddingX={1} paddingY={1} gap={1}>
+        <box
+          flexGrow={1}
+          flexDirection="column"
+          border
+          borderColor={focusIdx === 1 ? t.accent : t.border}
+          paddingX={1}
+          paddingY={1}
+          gap={1}
+          height="100%"
+          onMouseDown={() => setFocusIdx(1)}
+        >
           <text fg={t.accent} wrapMode="word">PATH B</text>
           <text fg={t.textMuted} wrapMode="word">session: {pathB?.session_id?.slice(0, 8) || "?"}…</text>
           {pathB?.model ? (
@@ -676,29 +673,32 @@ function CONFIGURE_VIEW(props: {
           ) : (
             <text fg={t.textMuted} onMouseDown={() => pickPath("B")} wrapMode="word">[ Pick model → ]</text>
           )}
-          <text fg={t.textMuted} wrapMode="word">Prompt:</text>
-          <input
-            value={pathB?.prompt ?? ""}
-            placeholder={pathB?.default_prompt ? `default: ${pathB.default_prompt.slice(0, 80)}${pathB.default_prompt.length > 80 ? "…" : ""}` : "type prompt for PATH B…"}
-            onInput={(v) => setLanePrompt("B", v)}
-            onSubmit={() => api.ui.toast({ variant: "info", message: "PATH B prompt saved" })}
-            textColor={t.text}
-            focused={focusIdx === 1}
-          />
         </box>
       </box>
 
-      {/* Prompt helpers: fill both with the same text, or mirror one
-          into the other. Click [both ← A] to type once in PATH A and
-          copy to PATH B. Click [A→B] or [B→A] to copy an existing
-          prompt to the other side. */}
-      <box flexDirection="row" gap={2} flexWrap="wrap">
-        <text fg={t.textMuted} wrapMode="word">prompts:</text>
-        <text fg={t.textMuted} onMouseDown={() => syncBoth()} wrapMode="word">[ both ← A ]</text>
-        <text fg={t.textMuted} onMouseDown={() => mirrorPrompts("A", "B")} wrapMode="word">[ A → B ]</text>
-        <text fg={t.textMuted} onMouseDown={() => mirrorPrompts("B", "A")} wrapMode="word">[ B → A ]</text>
-        <text fg={t.textMuted} wrapMode="word">·</text>
-        <text fg={t.textMuted} onMouseDown={() => clearPrompts()} wrapMode="word">[ clear both ]</text>
+      <box flexDirection="column" gap={0} flexShrink={0} onMouseDown={() => setFocusIdx(2)}>
+        <text fg={t.textMuted} wrapMode="word">Shared prompt (both lanes) · Shift+Enter newline</text>
+        <box flexGrow={0} minHeight={0}>
+          <textarea
+            key={`sb-prompt-${active.group_id}`}
+            ref={promptRef}
+            initialValue={sharedPrompt}
+            onContentChange={() => {
+              const v = promptRef.current?.plainText ?? ""
+              setBothPrompts(v)
+            }}
+            focused={focusIdx === 2}
+            placeholder={pathA?.default_prompt ? "Leave blank to re-use fork text on Run" : "What should both models answer?"}
+            textColor={t.text}
+            placeholderColor={t.textMuted}
+            backgroundColor={focusIdx === 2 ? t.backgroundElement : undefined}
+            focusedBackgroundColor={t.backgroundElement}
+            minHeight={5}
+            maxHeight={5}
+            wrapMode="word"
+          />
+        </box>
+        <text fg={t.textMuted} onMouseDown={() => setBothPrompts("")} wrapMode="word">[ clear prompt ]</text>
       </box>
 
       {bothPicked ? (
@@ -746,18 +746,6 @@ const plugin: HermPlugin = {
             await writeJsonQueued(activePath, { ...a, open_tab: false })
             api.route.navigate(TAB_NAME)
           }
-        }
-        if (a.activate_session_id == null) return
-        const target = String(a.activate_session_id)
-        const cleared = { ...a }
-        delete cleared.activate_session_id
-        await writeJsonQueued(activePath, cleared)
-        try {
-          await api.client.request("session.activate", { session_id: target })
-          api.route.navigate("Chat")
-          api.ui.toast({ variant: "info", message: `Resumed session ${target.slice(0, 8)}…` })
-        } catch (e) {
-          api.ui.toast({ variant: "error", message: `Activate failed: ${(e as Error).message}` })
         }
       })()
     }, 500)

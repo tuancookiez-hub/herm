@@ -27,7 +27,8 @@ import { readChangelog } from "./service/hermes-home"
 import { openMessage } from "./dialogs/message"
 import { openModelPicker } from "./dialogs/model-picker"
 import { resolveSchrodingerRoot, schrodingerDirFor } from "./utils/schrodinger-root"
-import { existsSync } from "fs"
+import { writeJsonQueued } from "./utils/schrodinger-io"
+import { existsSync, readFileSync } from "fs"
 import { join } from "path"
 import { openTextPrompt } from "./dialogs/text-prompt"
 import { parseEikonFile, type ParsedEikon } from "./components/avatar/eikon"
@@ -442,7 +443,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
     } finally {
       setSwitching(false)
     }
-  }, [reset, session, goToTab, gw])
+  }, [reset, session, goToTab, toast, gw])
 
   const liveStatus = (state?: string, running = false) => {
     if (state === "waiting") return "waiting for input…"
@@ -486,6 +487,34 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
       setSwitching(false)
     }
   }, [reset, session, goToTab, toast, gw])
+
+  const schrodingerActivateBusy = useRef(false)
+  useEffect(() => {
+    const tick = () => {
+      if (schrodingerActivateBusy.current) return
+      const root = resolveSchrodingerRoot()
+      if (!root) return
+      const activePath = join(root, schrodingerDirFor(root), "active.json")
+      if (!existsSync(activePath)) return
+      let aj: { activate_session_id?: string | number } | null = null
+      try {
+        aj = JSON.parse(readFileSync(activePath, "utf-8")) as { activate_session_id?: string | number }
+      } catch { return }
+      if (aj?.activate_session_id == null) return
+      const target = String(aj.activate_session_id)
+      schrodingerActivateBusy.current = true
+      void writeJsonQueued(activePath, { ...aj, activate_session_id: undefined }).then(() =>
+        activateSession(target)
+          .then(() => toast.show({ variant: "success", message: `Collapsed into ${target.slice(0, 8)}…` }))
+          .catch(() => {})
+          .finally(() => { schrodingerActivateBusy.current = false }),
+      )
+    }
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [activateSession, toast])
+
   // Rebind every HERMES_HOME reader, respawn the gateway subprocess
   // under the new env, and re-run the boot path. prefs.reload (inside
   // rehome) retints theme/eikon/keys via usePref; home.reset repaints
@@ -630,6 +659,7 @@ const AppInner = ({ launch: launch0 }: { launch: Launch }) => {
         group_id: groupId,
         phase: "configure",
         user_prompt: promptText,
+        fork_from_role: m.role,
         project_root: root,
         parent_session_id: parentDbFinal,
         owner_session_id: ownerDbFinal,
