@@ -41,8 +41,33 @@ export type QuotaState =
 
 const POLL_MS = 60_000
 
-const isQuotaSnapshot = (v: QuotaResponse): v is QuotaSnapshot => {
-  return Array.isArray((v as QuotaSnapshot).windows)
+const isQuotaSnapshot = (v: unknown): v is QuotaSnapshot => {
+  if (!v || typeof v !== "object") return false
+  const w = (v as QuotaSnapshot).windows
+  return Array.isArray(w)
+}
+
+const parseQuota = (res: unknown): QuotaState => {
+  if (!res || typeof res !== "object") return { state: "error", message: "empty response" }
+  const o = res as QuotaSnapshot & { state?: string }
+  if (o.state === "no_key") return { state: "no_key" }
+  if (!isQuotaSnapshot(o)) return { state: "no_key" }
+  if (o.windows.length === 0) {
+    return {
+      state: "available",
+      snapshot: {
+        provider: o.provider ?? "minimax",
+        source: o.source ?? "",
+        fetched_at: o.fetched_at ?? "",
+        title: o.title ?? "Account limits",
+        plan: o.plan ?? null,
+        windows: [],
+        details: o.details ?? [],
+        unavailable_reason: o.unavailable_reason ?? "no usage windows",
+      },
+    }
+  }
+  return { state: "available", snapshot: o }
 }
 
 const formatReset = (iso: string | null): string => {
@@ -74,11 +99,7 @@ export const useProviderQuota = (provider: string): QuotaState => {
       gw.request<QuotaResponse>("provider.quota", { provider })
         .then((res: QuotaResponse) => {
           if (cancelled) return
-          if (!isQuotaSnapshot(res)) {
-            setState({ state: "no_key" })
-            return
-          }
-          setState({ state: "available", snapshot: res })
+          setState(parseQuota(res))
         })
         .catch((e: unknown) => {
           if (cancelled) return

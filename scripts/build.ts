@@ -18,6 +18,7 @@
 
 import { $ } from "bun"
 import { rmSync, chmodSync } from "node:fs"
+import { basename } from "node:path"
 import pkg from "../package.json" with { type: "json" }
 
 rmSync("dist", { recursive: true, force: true })
@@ -91,7 +92,7 @@ if (!result.success) {
 
 const assets = result.outputs
   .filter(o => o.kind === "asset")
-  .map(o => o.path.replace(/^.*\/dist\//, ""))
+  .map(o => basename(o.path))
 const assetRe = new RegExp(`"\\.\\/(${assets.map(a =>
   a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})"`, "g")
 for (const out of result.outputs.filter(o => o.kind === "entry-point")) {
@@ -142,6 +143,6 @@ await $`cp -R src/theme/themes dist/themes`
 await $`cp -R assets dist/`
 
 const sizes = result.outputs
-  .map(o => [o.path.replace(/^.*\/dist\//, ""), (o.size / 1024).toFixed(0) + " KB"])
+  .map(o => [basename(o.path), (o.size / 1024).toFixed(0) + " KB"])
 console.table(Object.fromEntries(sizes))
 console.log(`\nbuild: dist/ ready (${result.outputs.length} files)`)

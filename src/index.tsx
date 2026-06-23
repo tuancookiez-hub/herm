@@ -5,7 +5,7 @@
 // override (MessageChannel/setImmediate = undefined) was a red herring — verified
 // via per-thread profiling that the main JS thread drives the render loop.
 
-import { createCliRenderer } from "@opentui/core";
+import { createCliRenderer, type CliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { App } from "./app";
 import { parseLaunch, HELP, VERSION } from "./app/launch";
@@ -16,7 +16,7 @@ import { skills } from "./service/bundled-skills";
 import { plugins } from "./service/bundled-plugins";
 import * as control from "./app/control";
 import * as preferences from "./context/preferences";
-import { resetTerminalModes, installExitResetHooks } from "./utils/terminal-reset";
+import { resetTerminalModes, installExitResetHooks, logAsyncFatal, installStderrPipeGuard, installConsolePipeNoiseFilter, isPipeNoise } from "./utils/terminal-reset";
 import { clampStdoutDimensions } from "./utils/terminal-size";
 import { warmup as warmTokens } from "./utils/tokens";
 import { prime as primeTheme, DEFAULT_THEME } from "./theme";
@@ -40,6 +40,29 @@ if (argv.includes("--version") || argv.includes("-v")) {
 }
 const launch = parseLaunch(argv)
 
+const die = (msg: string, code = 1): never => {
+  process.stderr.write(`${msg}\n`)
+  process.exit(code)
+}
+
+const diag = process.env.HERM_DIAG === "1"
+if (diag) {
+  const resolved = import.meta.path
+  process.stderr.write(
+    `[herm diag] path=${resolved} stdinTTY=${!!process.stdin.isTTY} stdoutTTY=${!!process.stdout.isTTY} argv=${JSON.stringify(argv)}\n`,
+  )
+}
+
+// OpenTUI needs a real terminal; without TTY the alt-screen flash then immediate
+// return to the shell looks like a "silent" exit.
+if (!process.stdout.isTTY || !process.stdin.isTTY) {
+  die(
+    "herm requires an interactive terminal (stdin and stdout must be a TTY).\n" +
+      "Run from Windows Terminal or PowerShell — not from a task runner, piped script, or IDE output panel.\n" +
+      "Try:  & \"$env:USERPROFILE\\bin\\herm.ps1\"  or  bun run \"$env:USERPROFILE\\dist\\index.js\"",
+  )
+}
+
 // Initialize and render
 const main = async () => {
   // Self-heal a tab that a prior crashed TUI left with mouse / focus
@@ -56,13 +79,33 @@ const main = async () => {
   const prefs = preferences.load()
 
   const end = perf.mark("renderer-init")
-  const renderer = await createCliRenderer({
-    exitOnCtrlC: false, // We handle Ctrl+C ourselves
-    useMouse: prefs.mouse ?? true,
-    targetFps: prefs.targetFps ?? 30,
-    gatherStats: false,
-  });
+  const showConsole = process.env.HERM_CONSOLE === "1"
+  const renderer = await (async (): Promise<CliRenderer> => {
+    try {
+      return await createCliRenderer({
+        exitOnCtrlC: false, // We handle Ctrl+C ourselves
+        useMouse: prefs.mouse ?? true,
+        targetFps: prefs.targetFps ?? 30,
+        gatherStats: false,
+        // Linux disables threaded native render in OpenTUI; on Windows the
+        // threaded path can segfault right after the first frame (splash flash).
+        useThread: process.platform === "darwin",
+        // Bottom console overlay: useful for dev (HERM_CONSOLE=1) but on
+        // Windows startup stderr EPIPE noise auto-opens it via openConsoleOnError.
+        consoleMode: showConsole ? "console-overlay" : "disabled",
+        openConsoleOnError: showConsole,
+      })
+    } catch (err) {
+      const hint =
+        process.platform === "win32"
+          ? " (if this persists: reinstall deps with `bun install` — needs @opentui/core-win32-x64)"
+          : ""
+      const msg = err instanceof Error ? (err.stack ?? err.message) : String(err)
+      return die(`createCliRenderer failed${hint}:\n${msg}`)
+    }
+  })()
   end()
+  installConsolePipeNoiseFilter()
 
   // OpenTUI's setupTerminal emits CSI >4;1m (modifyOtherKeys=1), then
   // upgrades to kitty (CSI >4;0m + CSI >{flags}u) only if the async
@@ -94,6 +137,18 @@ const main = async () => {
   endRender()
   perf.boot("first-render", Bun.nanoseconds() / 1e6)
 
+  // Default control state is idle: requestRender paints one frame then stops.
+  // When main() returns the event loop can go empty → beforeExit → destroy()
+  // (flash of splash, then back at the shell). Explicit start keeps the loop.
+  renderer.start()
+  installStderrPipeGuard()
+  if (process.stdin.isTTY) process.stdin.resume()
+
+  // Bun/Windows: keep the event loop referenced until OpenTUI destroys.
+  // Without this, a gap between main() finishing setup and the render loop
+  // scheduling can fire `beforeExit` → destroy() (splash flash, then shell).
+  const keep = setInterval(() => {}, 60 * 60 * 1000)
+
   // gpt-tokenizer is ~170ms to import and not needed for first frame;
   // kick it off the hot path so the first count() call doesn't stall.
   warmTokens()
@@ -111,8 +166,27 @@ const main = async () => {
 
   // Control server for headless interaction (CONTROL=1)
   control.start()
+
+  if (diag) {
+    process.stderr.write("[herm diag] main setup done; waiting on renderer lifecycle\n")
+  }
+  await new Promise<void>((resolve) => {
+    renderer.once("destroy", () => {
+      clearInterval(keep)
+      resolve()
+    })
+  })
 };
 
-main().catch(console.error);
+process.on("unhandledRejection", (reason) => {
+  if (isPipeNoise(reason)) return
+  logAsyncFatal("unhandledRejection", reason)
+})
+
+main().catch((err) => {
+  const msg = err instanceof Error ? (err.stack ?? err.message) : String(err)
+  process.stderr.write(`herm failed to start:\n${msg}\n`)
+  process.exit(1)
+})
 
 export {};

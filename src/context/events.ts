@@ -192,6 +192,7 @@ export function mapEvent(ev: GatewayEvent, side: Side): Action | null {
       // stderr is a diagnostic side channel, not the turn lifecycle source
       // of truth, so it must not end an active stream.
       const line = ev.payload.line
+      if (/EPIPE|broken pipe/i.test(line)) return null
       if (/error|fail|traceback|exception|\b[45]\d\d\b|refused|denied|unauthori/i.test(line))
         return { kind: "error", text: line, fatal: false }
       return null

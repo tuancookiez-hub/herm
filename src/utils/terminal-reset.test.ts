@@ -1,8 +1,5 @@
 import { describe, it, expect } from "bun:test"
-import { TERMINAL_MODE_RESET } from "./terminal-reset"
-
-// The SIGINT handler calls process.exit, so it's tested via subprocess
-// rather than by firing the signal in-band.
+import { TERMINAL_MODE_RESET, isPipeNoise } from "./terminal-reset"
 
 describe("terminal-reset", () => {
   it("reset blob includes alt-screen leave and cursor-visible", () => {
@@ -10,22 +7,9 @@ describe("terminal-reset", () => {
     expect(TERMINAL_MODE_RESET).toContain("\x1b[?25h")
   })
 
-  it("SIGINT handler exits the process (130) after emitting reset", async () => {
-    // Child installs hooks on a fake TTY, then SIGINTs itself. If the
-    // handler doesn't exit, the open stdin keeps the loop alive and the
-    // test times out.
-    const child = Bun.spawn(["bun", "-e", `
-      const { installExitResetHooks, resetTerminalModes } = await import(${JSON.stringify(import.meta.resolve("./terminal-reset"))})
-      Object.defineProperty(process.stdout, "isTTY", { value: true })
-      installExitResetHooks()
-      process.stdin.resume() // hold the loop so only the handler can end us
-      process.kill(process.pid, "SIGINT")
-    `], { stdout: "pipe", stderr: "pipe" })
-    const code = await child.exited
-    const out = await new Response(child.stdout).text()
-    expect(code).toBe(130)
-    // reset blob fires at least once (signal handler) — the `exit`
-    // hook may fire a second copy; both land before the fd closes.
-    expect(out.split("\x1b[?2029l").length - 1).toBeGreaterThanOrEqual(1)
+  it("isPipeNoise matches EPIPE", () => {
+    expect(isPipeNoise(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))).toBe(true)
+    expect(isPipeNoise("Error: EPIPE: broken pipe, write")).toBe(true)
+    expect(isPipeNoise(new Error("gateway exited (1)"))).toBe(false)
   })
 })

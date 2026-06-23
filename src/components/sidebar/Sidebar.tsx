@@ -10,10 +10,8 @@ import { useProcessCwd } from "../../utils/cwd"
 import { Tail } from "../chat/ThoughtCloud"
 import { ContextGauge } from "./ContextGauge"
 import { CronStatus } from "./CronStatus"
-import { OverheadGauge } from "./OverheadGauge"
 import { ProviderRow } from "./ProviderRow"
 import { ReasoningRow } from "./ReasoningRow"
-import { MiniMaxQuota } from "./MiniMaxQuota"
 
 export type HiddenContext = {
   profile?: string
@@ -187,8 +185,6 @@ export const Sidebar = memo((props: {
 
         <box flexGrow={1} />
         <CronStatus width={INNER} open={cronOpen} onToggle={() => setCronOpen(o => !o)} />
-        <MiniMaxQuota defaultOpen={false} />
-        <OverheadGauge info={info} usage={props.usage} width={INNER} />
         <ContextGauge info={info} usage={props.usage} width={INNER} />
       </box>
     </box>

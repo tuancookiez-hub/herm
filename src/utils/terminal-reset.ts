@@ -14,7 +14,9 @@
 // crashed process) and on every exit path (so our own crash doesn't
 // poison the next shell prompt).
 
-import { writeSync } from "node:fs"
+import { appendFileSync, writeSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 
 export const TERMINAL_MODE_RESET =
   "\x1b[0'z" +     // DEC locator reporting
@@ -89,6 +91,56 @@ export function resetTerminalModes(stream: ResettableStream = process.stdout): b
  * it always lands before the process reaps.
  */
 let wired = false
+
+/** Benign when OpenTUI's console capture owns stderr/stdout pipes (Windows). */
+export function isPipeNoise(err: unknown): boolean {
+  if (err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "EPIPE")
+    return true
+  const s = err instanceof Error ? err.message : String(err)
+  return /EPIPE|broken pipe/i.test(s)
+}
+
+export function safeStderrWrite(chunk: string): void {
+  try {
+    process.stderr.write(chunk)
+  } catch (e) {
+    if (!isPipeNoise(e)) throw e
+  }
+}
+
+/** Drop EPIPE from hijacked console methods (OpenTUI overlay). */
+export function installConsolePipeNoiseFilter(): void {
+  const wrap = (level: "log" | "info" | "warn" | "error" | "debug") => {
+    const orig = console[level].bind(console)
+    console[level] = (...args: unknown[]) => {
+      if (args.some(a => isPipeNoise(a))) return
+      const text = args.map(a => (typeof a === "string" ? a : "")).join(" ")
+      if (/EPIPE|broken pipe/i.test(text)) return
+      orig(...args)
+    }
+  }
+  wrap("error")
+  wrap("warn")
+}
+
+/** Swallow EPIPE on stdio streams after the renderer hijacks them. */
+export function installStderrPipeGuard(): void {
+  const on = (err: Error) => { if (isPipeNoise(err)) return }
+  process.stderr.on("error", on)
+  process.stdout.on("error", on)
+}
+
+function crashLog(label: string, err: unknown) {
+  if (isPipeNoise(err)) return
+  const msg = err instanceof Error ? (err.stack ?? err.message) : String(err)
+  const line = `${new Date().toISOString()} ${label}\n${msg}\n`
+  try {
+    const home = process.env.HERMES_HOME || join(homedir(), ".hermes")
+    appendFileSync(join(home, "herm-crash.log"), line)
+  } catch { /* best-effort */ }
+  safeStderrWrite(`herm: ${label}\n${msg}\n`)
+}
+
 export function installExitResetHooks(): void {
   if (wired) return
   wired = true
@@ -97,33 +149,12 @@ export function installExitResetHooks(): void {
   // `exit` handler must be synchronous (node discards async work).
   process.on("exit", () => { resetTerminalModes() })
 
-  // Signals. Attaching a listener suppresses node's default terminate,
-  // so we must exit ourselves. OpenTUI's exitHandler was registered
-  // after ours (createCliRenderer runs later) and also listens here —
-  // but all it does is destroy(), whose terminal writes our reset blob
-  // already covers. writeSync flushes before exit() tears the fd.
-  const codes = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 } as const
-  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-    process.on(sig, () => {
-      resetTerminalModes()
-      process.exit(codes[sig])
-    })
-  }
+  // Do not register SIGINT/SIGTERM here — AppInner wires SIGINT → quit()
+  // after mount, and OpenTUI registers its own exitSignals on the renderer.
+  // Duplicate SIGINT handlers caused immediate process.exit(130) races.
+}
 
-  // Uncaught throws. Emit reset before node prints the stack, so the
-  // traceback renders on a clean primary screen.
-  process.on("uncaughtException", err => {
-    resetTerminalModes()
-    // Re-throw via default behavior by writing + exiting after a tick.
-    // We print here instead of letting it reach the default handler
-    // because OpenTUI may have the alt-screen active and the default
-    // traceback would land there and disappear on exit.
-    console.error(err)
-    process.exit(1)
-  })
-  process.on("unhandledRejection", reason => {
-    resetTerminalModes()
-    console.error(reason)
-    process.exit(1)
-  })
+/** Log fatal async errors without tearing down the TUI (boot catches RPC). */
+export function logAsyncFatal(label: string, err: unknown): void {
+  crashLog(label, err)
 }
